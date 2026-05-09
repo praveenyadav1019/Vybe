@@ -1,0 +1,23 @@
+{
+  "name": "vybeon",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @vybeon/types && npm run build -w @vybeon/api",
+    "dev:api": "npm run dev -w @vybeon/api",
+    "dev:mobile": "npm run start -w @vybeon/mobile",
+    "db:generate": "npm run db:generate -w @vybeon/api",
+    "db:migrate": "npm run db:migrate -w @vybeon/api",
+    "db:push": "npm run db:push -w @vybeon/api",
+    "db:seed": "npm run db:seed -w @vybeon/api",
+    "docker:up": "docker-compose -f infra/docker-compose.yml up -d",
+    "docker:down": "docker-compose -f infra/docker-compose.yml down",
+    "lint": "npm run lint -w @vybeon/api --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
