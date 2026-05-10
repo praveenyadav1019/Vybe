@@ -36,6 +36,10 @@ const schema = z.object({
   STORAGE_REGION: z.string().default("us-east-1"),
   STORAGE_ACCESS_KEY: z.string().optional(),
   STORAGE_SECRET_KEY: z.string().optional(),
+
+  // Google Places
+  GOOGLE_PLACES_API_KEY: z.string().optional(),
+  VIBE_REFRESH_INTERVAL_MS: z.coerce.number().default(300000), // 5 min
 });
 
 export type Env = z.infer<typeof schema>;

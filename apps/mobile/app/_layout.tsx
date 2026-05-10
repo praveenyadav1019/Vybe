@@ -26,12 +26,12 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
-          <StatusBar style="light" backgroundColor="#0A0A0A" />
+          <StatusBar style="auto" />
           <Stack
             screenOptions={{
               headerShown: false,
               animation: 'fade',
-              contentStyle: { backgroundColor: '#0A0A0A' },
+              contentStyle: { backgroundColor: 'transparent' },
             }}
           >
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

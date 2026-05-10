@@ -18,6 +18,7 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   withSequence,
+  withRepeat,
   FadeOut,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
@@ -58,13 +59,39 @@ import { api } from '@/lib/api';
 type CallState = 'ringing' | 'connecting' | 'active' | 'ended';
 
 // ─── Remote Video Placeholder ─────────────────────────────────────────────────
-function RemoteVideoPlaceholder({ name }: { name: string }) {
+function RemoteVideoPlaceholder({ name, callState }: { name: string; callState: CallState }) {
   const initials = name
     .split(' ')
     .map((n) => n[0])
     .join('')
     .toUpperCase()
     .slice(0, 2);
+
+  const breathe = useSharedValue(1);
+
+  React.useEffect(() => {
+    if (callState === 'active') {
+      breathe.value = withRepeat(
+        withSequence(
+          withSpring(1.06, { damping: 8 }),
+          withSpring(1, { damping: 8 })
+        ),
+        -1,
+        false
+      );
+    }
+  }, [callState]);
+
+  const avatarStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: breathe.value }],
+  }));
+
+  const statusMsg = {
+    ringing: 'Ringing...',
+    connecting: 'Connecting...',
+    active: null,
+    ended: 'Call Ended',
+  }[callState];
 
   return (
     <LinearGradient
@@ -73,16 +100,12 @@ function RemoteVideoPlaceholder({ name }: { name: string }) {
       start={{ x: 0.3, y: 0 }}
       end={{ x: 0.7, y: 1 }}
     >
-      <View style={styles.remoteAvatarCircle}>
+      <Animated.View style={[styles.remoteAvatarCircle, callState === 'active' && avatarStyle]}>
         <Text style={styles.remoteAvatarText}>{initials}</Text>
-      </View>
-      {/* TODO: Replace above View with Agora RtcSurfaceView for remote uid */}
-      <Text style={styles.remoteVideoHint}>
-        📹 Waiting for video stream...
-      </Text>
-      <Text style={styles.remoteVideoHintSub}>
-        (Agora SDK integration required)
-      </Text>
+      </Animated.View>
+      {statusMsg && (
+        <Text style={styles.remoteVideoHint}>{statusMsg}</Text>
+      )}
     </LinearGradient>
   );
 }
@@ -422,7 +445,7 @@ export default function VideoCallScreen() {
         onPress={resetControlsTimer}
         style={StyleSheet.absoluteFill}
       >
-        <RemoteVideoPlaceholder name={name} />
+        <RemoteVideoPlaceholder name={name} callState={callState} />
       </TouchableOpacity>
 
       {/* Local video (draggable preview) */}
@@ -608,8 +631,6 @@ function ControlsContent({
   );
 }
 
-type CallState = 'ringing' | 'connecting' | 'active' | 'ended';
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -645,12 +666,7 @@ const styles = StyleSheet.create({
     color: colors.subtext,
     fontSize: 14,
     textAlign: 'center',
-  },
-  remoteVideoHintSub: {
-    color: 'rgba(161,161,170,0.5)',
-    fontSize: 11,
-    textAlign: 'center',
-    marginTop: 4,
+    marginTop: 16,
   },
 
   // Local video

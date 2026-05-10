@@ -64,7 +64,7 @@ export default function ProfileScreen() {
         <Animated.View entering={FadeInDown.delay(50)} style={styles.header}>
           <Text style={styles.headerTitle}>Profile</Text>
           <View style={styles.headerActions}>
-            <TouchableOpacity onPress={() => router.push('/(app)/settings/')} style={styles.iconBtn}>
+            <TouchableOpacity onPress={() => router.push('/(app)/settings/index' as any)} style={styles.iconBtn}>
               <Ionicons name="settings-outline" size={22} color={colors.text} />
             </TouchableOpacity>
           </View>
@@ -230,8 +230,6 @@ export default function ProfileScreen() {
                 <Button
                   title="Verify"
                   onPress={() => router.push('/(auth)/face-verify')}
-                  size="sm"
-                  fullWidth={false}
                 />
               </View>
             </GlassCard>
@@ -268,7 +266,7 @@ export default function ProfileScreen() {
             <Text style={styles.actionText}>Safety Center</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.subtext} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push('/(app)/settings/')} style={styles.actionRow}>
+          <TouchableOpacity onPress={() => router.push('/(app)/settings/index' as any)} style={styles.actionRow}>
             <Ionicons name="settings-outline" size={20} color={colors.text} />
             <Text style={styles.actionText}>Settings</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.subtext} />

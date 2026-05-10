@@ -14,6 +14,11 @@ import chatRoutes from "./routes/chat.js";
 import callsRoutes from "./routes/calls.js";
 import placesRoutes from "./routes/places.js";
 import safetyRoutes from "./routes/safety.js";
+import clubmatesRoutes from "./routes/clubmates.js";
+import partiesRoutes from "./routes/parties.js";
+import connectionsRoutes from "./routes/connections.js";
+import strangerRoutes from "./routes/stranger.js";
+import adminRoutes from "./routes/admin.js";
 
 // ─── Module augmentation ──────────────────────────────────────────────────────
 
@@ -25,6 +30,7 @@ declare module "fastify" {
       req: import("fastify").FastifyRequest,
       reply: import("fastify").FastifyReply
     ) => Promise<void>;
+    placesService: import("./lib/google-places.js").GooglePlacesService | null;
   }
 }
 
@@ -46,6 +52,7 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
   // ── Decorators ─────────────────────────────────────────────────────────────
   app.decorate("env", env);
   app.decorate("io", null as Server | null);
+  // placesService is decorated after plugin init below (value depends on env key)
 
   // ── CORS ───────────────────────────────────────────────────────────────────
   await app.register(cors, {
@@ -72,6 +79,18 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
       request: import("fastify").FastifyRequest,
       reply: import("fastify").FastifyReply
     ) {
+      // Dev bypass: allow the hardcoded test token without JWT verification
+      if (env.NODE_ENV !== "production") {
+        const rawAuth = request.headers.authorization ?? "";
+        const token = rawAuth.startsWith("Bearer ") ? rawAuth.slice(7) : rawAuth;
+        if (token === "dev-access-token") {
+          (request as unknown as { user: { sub: string; phone: string } }).user = {
+            sub: "dev-user-1",
+            phone: "dev",
+          };
+          return;
+        }
+      }
       try {
         await request.jwtVerify();
       } catch {
@@ -94,6 +113,12 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
   await app.register(prismaPlugin);
   await app.register(redisPlugin);
 
+  // Initialize Google Places if key available
+  const placesService = env.GOOGLE_PLACES_API_KEY
+    ? new (await import("./lib/google-places.js")).GooglePlacesService(env.GOOGLE_PLACES_API_KEY)
+    : null;
+  app.decorate("placesService", placesService);
+
   // ── Routes ─────────────────────────────────────────────────────────────────
   await app.register(authRoutes);
   await app.register(profileRoutes);
@@ -103,6 +128,11 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
   await app.register(callsRoutes);
   await app.register(placesRoutes);
   await app.register(safetyRoutes);
+  await app.register(clubmatesRoutes);
+  await app.register(partiesRoutes);
+  await app.register(connectionsRoutes);
+  await app.register(strangerRoutes);
+  await app.register(adminRoutes);
 
   // ── Health check ───────────────────────────────────────────────────────────
   app.get("/health", async () => ({
@@ -114,9 +144,10 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
   // ── Global error handler ───────────────────────────────────────────────────
   app.setErrorHandler((err, req, reply) => {
     const statusCode = (err as { statusCode?: number }).statusCode ?? 500;
+    const message = err instanceof Error ? err.message : "Internal server error";
     app.log.error({ err, url: req.url, method: req.method }, "Unhandled error");
     return reply.status(statusCode).send({
-      error: statusCode === 500 ? "Internal server error" : err.message,
+      error: statusCode === 500 ? "Internal server error" : message,
     });
   });
 

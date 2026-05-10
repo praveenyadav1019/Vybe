@@ -1,241 +1,420 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Dimensions, Alert,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  Dimensions, Alert, ActivityIndicator, StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import Animated, { FadeInDown } from 'react-native-reanimated';
-import { api } from '@/lib/api';
-import { colors } from '@/theme/colors';
-import { GlassCard } from '@/components/ui/GlassCard';
-import { Button } from '@/components/ui/Button';
-import { Avatar } from '@/components/ui/Avatar';
-import type { Place, NearbyUser } from '@/types';
+import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
+import { useVenueStore, ClubMateBroadcast } from '@/stores/venueStore';
+import { useAuthStore } from '@/stores/authStore';
+import { light } from '@/theme/lightColors';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: W, height: H } = Dimensions.get('window');
 
-function VibeGauge({ score, label }: { score: number; label: string }) {
-  const color = score >= 8 ? colors.success : score >= 6 ? colors.warning : colors.danger;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function vibeColor(score: number) {
+  if (score >= 90) return light.vibe.fire;
+  if (score >= 75) return light.vibe.hype;
+  if (score >= 60) return light.vibe.vibe;
+  if (score >= 45) return light.vibe.active;
+  if (score >= 30) return light.vibe.chill;
+  return light.vibe.quiet;
+}
+
+function vibeLabel(score: number) {
+  if (score >= 90) return '🔥 Fire';
+  if (score >= 75) return '🎉 Hype';
+  if (score >= 60) return '😎 Vibe';
+  if (score >= 45) return '✨ Active';
+  if (score >= 30) return '👌 Chill';
+  return '😐 Quiet';
+}
+
+// ─── Score Gauge ──────────────────────────────────────────────────────────────
+
+function ScoreGauge({ label, value, max = 100 }: { label: string; value: number; max?: number }) {
+  const pct = Math.min((value / max) * 100, 100);
+  const color = vibeColor(value);
   return (
-    <View style={{ flex: 1, alignItems: 'center', gap: 6 }}>
-      <Text style={{ color: colors.subtext, fontSize: 11, fontWeight: '600' }}>{label}</Text>
-      <View style={gaugeStyles.track}>
-        <View style={[gaugeStyles.fill, { width: `${score * 10}%`, backgroundColor: color }]} />
+    <View style={gauge.wrap}>
+      <Text style={gauge.label}>{label}</Text>
+      <View style={gauge.track}>
+        <View style={[gauge.fill, { width: `${pct}%` as any, backgroundColor: color }]} />
       </View>
-      <Text style={{ color, fontSize: 18, fontWeight: '800' }}>{score.toFixed(1)}</Text>
+      <Text style={[gauge.value, { color }]}>{value}</Text>
     </View>
   );
 }
 
-const gaugeStyles = StyleSheet.create({
-  track: { width: '100%', height: 6, borderRadius: 3, backgroundColor: colors.border },
+const gauge = StyleSheet.create({
+  wrap: { flex: 1, alignItems: 'center', gap: 6 },
+  label: { color: light.textTer, fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  track: { width: '100%', height: 6, borderRadius: 3, backgroundColor: light.border },
   fill: { height: '100%', borderRadius: 3 },
+  value: { fontSize: 20, fontWeight: '800' },
 });
 
-export default function PlaceDetailsScreen() {
+// ─── Club Mate Card ───────────────────────────────────────────────────────────
+
+function ClubMateCard({
+  broadcast,
+  onJoin,
+  isJoining,
+}: {
+  broadcast: ClubMateBroadcast;
+  onJoin: () => void;
+  isJoining: boolean;
+}) {
+  const typeLabels: Record<ClubMateBroadcast['type'], string> = {
+    female: '👩 Female', male: '👨 Male', couple: '💑 Couple',
+    group: '👥 Group', any: '🌍 Anyone',
+  };
+
+  return (
+    <View style={cmCard.wrap}>
+      <View style={cmCard.av}>
+        {broadcast.fromUser.photoUrl ? (
+          <Image source={{ uri: broadcast.fromUser.photoUrl }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+        ) : (
+          <Text style={{ color: light.primary, fontWeight: '700', fontSize: 16 }}>
+            {broadcast.fromUser.name.charAt(0)}
+          </Text>
+        )}
+      </View>
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={cmCard.name}>{broadcast.fromUser.name}, {broadcast.fromUser.age}</Text>
+          {broadcast.fromUser.verified && (
+            <Ionicons name="checkmark-circle" size={14} color={light.primary} />
+          )}
+        </View>
+        <Text style={cmCard.type}>{typeLabels[broadcast.type]}</Text>
+        {broadcast.message ? <Text style={cmCard.msg} numberOfLines={2}>{broadcast.message}</Text> : null}
+        {broadcast.goingAt ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+            <Ionicons name="time-outline" size={11} color={light.textTer} />
+            <Text style={cmCard.time}>Going at {broadcast.goingAt}</Text>
+          </View>
+        ) : null}
+      </View>
+      <TouchableOpacity
+        onPress={onJoin}
+        style={[cmCard.joinBtn, isJoining && { opacity: 0.6 }]}
+        disabled={isJoining}
+      >
+        {isJoining ? (
+          <ActivityIndicator size="small" color="#FFF" />
+        ) : (
+          <Text style={cmCard.joinText}>Join</Text>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const cmCard = StyleSheet.create({
+  wrap: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: light.border },
+  av: { width: 46, height: 46, borderRadius: 23, backgroundColor: light.primaryLight, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  name: { color: light.text, fontSize: 14, fontWeight: '700' },
+  type: { color: light.textTer, fontSize: 12, marginTop: 1 },
+  msg: { color: light.textSec, fontSize: 12, marginTop: 2 },
+  time: { color: light.textTer, fontSize: 11 },
+  joinBtn: { backgroundColor: light.primary, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8 },
+  joinText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+});
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+
+export default function VenueDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const [checkedIn, setCheckedIn] = useState(false);
+  const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
+  const {
+    selectedVenue, clubMatesBroadcasts, checkedInVenueId,
+    fetchVenueDetail, checkIn, checkOut, fetchClubMates, joinClubMate,
+  } = useVenueStore();
 
-  const { data: placeData, isLoading } = useQuery({
-    queryKey: ['place', id],
-    queryFn: () => api.get<{ place: Place }>(`/places/${id}`).then(r => r.data.place),
-  });
+  const [loading, setLoading] = useState(true);
+  const [checkingIn, setCheckingIn] = useState(false);
+  const [joiningId, setJoiningId] = useState<string | null>(null);
+  const [photoIndex, setPhotoIndex] = useState(0);
 
-  const { data: nearbyData } = useQuery({
-    queryKey: ['place-users', id],
-    queryFn: () => api.get<{ users: NearbyUser[] }>(`/location/nearby?radius=100`).then(r => r.data.users),
-  });
+  const venue = selectedVenue?.id === id ? selectedVenue : null;
+  const isCheckedIn = checkedInVenueId === id;
 
-  const checkinMutation = useMutation({
-    mutationFn: () => api.post(`/places/${id}/checkin`),
-    onSuccess: () => {
-      setCheckedIn(true);
-      Alert.alert('✅ Checked In!', `You're now checked in at ${place?.name}`);
-    },
-  });
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      await fetchVenueDetail(id);
+      await fetchClubMates(id);
+      setLoading(false);
+    }
+    void load();
+  }, [id]);
 
-  const place = placeData;
-  const nearbyUsers = nearbyData?.slice(0, 5) || [];
+  const handleCheckIn = useCallback(async () => {
+    if (isCheckedIn) {
+      Alert.alert(
+        'Check Out?',
+        `Leave ${venue?.name}?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Check Out', style: 'destructive', onPress: async () => {
+            await checkOut(id);
+          }},
+        ]
+      );
+      return;
+    }
+    setCheckingIn(true);
+    const ok = await checkIn(id);
+    setCheckingIn(false);
+    if (ok) Alert.alert('Checked in! 🎉', `You're at ${venue?.name}`);
+  }, [isCheckedIn, id, venue?.name]);
 
-  if (isLoading || !place) {
+  const handleJoin = useCallback(async (broadcastId: string) => {
+    setJoiningId(broadcastId);
+    const ok = await joinClubMate(broadcastId);
+    setJoiningId(null);
+    if (ok) Alert.alert('Request sent!', 'They\'ll get a notification.');
+  }, []);
+
+  if (loading || !venue) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loading}>
-          <Text style={{ color: colors.subtext }}>Loading...</Text>
-        </View>
-      </SafeAreaView>
+      <View style={[s.root, { justifyContent: 'center', alignItems: 'center' }]}>
+        <StatusBar barStyle="light-content" />
+        <ActivityIndicator color={light.primary} size="large" />
+      </View>
     );
   }
 
-  const typeEmoji = { club: '🎵', bar: '🍻', lounge: '🛋️', rooftop: '🌙', restaurant: '🍽️' }[place.type] || '📍';
+  const color = vibeColor(venue.vibeScore);
+  const label = vibeLabel(venue.vibeScore);
+  const photo = venue.photos?.[photoIndex];
 
   return (
-    <View style={styles.container}>
-      {/* Photo Header */}
-      <View style={styles.photoHeader}>
-        {place.photos[0] ? (
-          <Image source={{ uri: place.photos[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-        ) : (
-          <LinearGradient colors={[colors.primary, colors.card]} style={StyleSheet.absoluteFillObject} />
-        )}
-        <LinearGradient colors={['rgba(0,0,0,0.5)', 'transparent', 'rgba(0,0,0,0.8)']} style={StyleSheet.absoluteFillObject} />
+    <View style={s.root}>
+      <StatusBar barStyle="light-content" />
 
-        {/* Back Button */}
-        <SafeAreaView style={styles.headerOverlay}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+      {/* Hero */}
+      <View style={s.hero}>
+        {photo ? (
+          <Image source={{ uri: photo }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+        ) : (
+          <LinearGradient colors={[light.primary, light.pink]} style={StyleSheet.absoluteFillObject} />
+        )}
+        <LinearGradient
+          colors={['rgba(0,0,0,0.55)', 'transparent', 'rgba(0,0,0,0.72)']}
+          style={StyleSheet.absoluteFillObject}
+          locations={[0, 0.4, 1]}
+        />
+
+        {/* Back + Live badge */}
+        <View style={[s.heroTop, { paddingTop: insets.top + 8 }]}>
+          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
             <Ionicons name="arrow-back" size={22} color="#FFF" />
           </TouchableOpacity>
-          {place.isHappening && (
-            <View style={styles.happeningBadge}>
-              <View style={styles.happeningDot} />
-              <Text style={styles.happeningText}>HAPPENING NOW</Text>
+          {venue.isHappening && (
+            <View style={s.liveBadge}>
+              <View style={s.liveDot} />
+              <Text style={s.liveText}>LIVE NOW</Text>
             </View>
           )}
-        </SafeAreaView>
+        </View>
 
-        {/* Place Name Overlay */}
-        <View style={styles.nameOverlay}>
-          <Text style={styles.placeEmoji}>{typeEmoji}</Text>
-          <Text style={styles.placeName}>{place.name}</Text>
-          <Text style={styles.placeAddr}>{place.address}</Text>
+        {/* Photo dots */}
+        {venue.photos.length > 1 && (
+          <View style={s.photoDots}>
+            {venue.photos.slice(0, 5).map((_, i) => (
+              <TouchableOpacity key={i} onPress={() => setPhotoIndex(i)}>
+                <View style={[s.photoDot, i === photoIndex && s.photoDotActive]} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Name overlay */}
+        <View style={s.heroBottom}>
+          <Text style={s.venueName}>{venue.name}</Text>
+          <Text style={s.venueCategory}>{venue.category}</Text>
+          <View style={s.heroMeta}>
+            <View style={s.heroBadge}>
+              <Text style={[s.heroBadgeText, { color }]}>{label}</Text>
+            </View>
+            {venue.rating != null && (
+              <View style={s.ratingRow}>
+                <Ionicons name="star" size={13} color={light.amber} />
+                <Text style={s.ratingText}>{venue.rating.toFixed(1)}</Text>
+              </View>
+            )}
+            <Text style={s.heroMetaText}>
+              <Ionicons name="location-outline" size={12} color="rgba(255,255,255,0.7)" /> {venue.distance}
+            </Text>
+          </View>
         </View>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
-        {/* Scores */}
-        <Animated.View entering={FadeInDown.delay(100)}>
-          <GlassCard style={styles.scoresCard}>
-            <View style={styles.scoresRow}>
-              <VibeGauge score={place.vibeScore} label="⚡ Vibe Score" />
-              <View style={styles.scoreDivider} />
-              <VibeGauge score={place.crowdScore} label="👥 Crowd Level" />
-            </View>
-            <View style={styles.activeUsersRow}>
-              <Ionicons name="people" size={16} color={colors.accent} />
-              <Text style={styles.activeUsersText}>{place.activeUsers} VYBEONers here right now</Text>
-            </View>
-          </GlassCard>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: light.bg }}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
+      >
+        {/* Score cards */}
+        <Animated.View entering={FadeInDown.delay(60)} style={s.scoreCard}>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <ScoreGauge label="⚡ Vibe Score" value={venue.vibeScore} />
+            <View style={{ width: 1, backgroundColor: light.border }} />
+            <ScoreGauge label="👥 Crowd" value={venue.crowdScore} />
+          </View>
+          <View style={s.activeRow}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: light.success }} />
+            <Text style={s.activeText}>{venue.activeUsers} people here right now</Text>
+          </View>
         </Animated.View>
 
-        {/* Distance + Type */}
-        <Animated.View entering={FadeInDown.delay(150)}>
-          <GlassCard style={styles.infoCard}>
-            <View style={styles.infoRow}>
-              <View style={styles.infoItem}>
-                <Ionicons name="navigate-outline" size={16} color={colors.subtext} />
-                <Text style={styles.infoText}>{place.distance}</Text>
-              </View>
-              <View style={styles.infoItem}>
-                <Text style={styles.typeChip}>{place.type.toUpperCase()}</Text>
-              </View>
-            </View>
-            {place.description && <Text style={styles.description}>{place.description}</Text>}
-            {place.tags?.length > 0 && (
-              <View style={styles.tagsRow}>
-                {place.tags.map(tag => (
-                  <View key={tag} style={styles.tag}>
-                    <Text style={styles.tagText}>{tag}</Text>
-                  </View>
-                ))}
-              </View>
+        {/* Check In button */}
+        <Animated.View entering={FadeInDown.delay(100)} style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+          <TouchableOpacity
+            onPress={handleCheckIn}
+            style={[s.checkInBtn, isCheckedIn && { backgroundColor: light.success }]}
+            disabled={checkingIn}
+          >
+            {checkingIn ? (
+              <ActivityIndicator color="#FFF" size="small" />
+            ) : (
+              <>
+                <Ionicons name={isCheckedIn ? 'checkmark-circle' : 'location'} size={18} color="#FFF" />
+                <Text style={s.checkInText}>
+                  {isCheckedIn ? 'Checked In — Tap to Leave' : `Check In at ${venue.name}`}
+                </Text>
+              </>
             )}
-          </GlassCard>
-        </Animated.View>
-
-        {/* VYBEONers Here */}
-        {nearbyUsers.length > 0 && (
-          <Animated.View entering={FadeInDown.delay(200)}>
-            <GlassCard style={styles.usersCard}>
-              <Text style={styles.usersTitle}>VYBEONers Nearby 🎉</Text>
-              <View style={styles.avatarsRow}>
-                {nearbyUsers.map(u => (
-                  <TouchableOpacity key={u.id} onPress={() => router.push(`/(app)/user/${u.id}`)}>
-                    <Avatar uri={u.photos[0]} name={u.name} size="sm" showOnline isOnline={u.isOnline} />
-                  </TouchableOpacity>
-                ))}
-                {place.activeUsers > 5 && (
-                  <View style={styles.moreAvatars}>
-                    <Text style={styles.moreText}>+{place.activeUsers - 5}</Text>
-                  </View>
-                )}
-              </View>
-            </GlassCard>
-          </Animated.View>
-        )}
-
-        {/* Address / Map Placeholder */}
-        <Animated.View entering={FadeInDown.delay(250)}>
-          <GlassCard style={styles.mapCard}>
-            <View style={styles.mapPlaceholder}>
-              <Ionicons name="map-outline" size={32} color={colors.primary} />
-              {/* TODO: Replace with actual react-native-maps MapView */}
-              <Text style={styles.mapPlaceholderText}>{place.address}</Text>
-              <Text style={styles.mapNote}>Map view coming soon</Text>
-            </View>
-          </GlassCard>
-        </Animated.View>
-
-        {/* Check-in Button */}
-        <View style={styles.checkInWrapper}>
-          <Button
-            title={checkedIn ? '✅ Checked In!' : `Check In at ${place.name}`}
-            onPress={() => !checkedIn && checkinMutation.mutate()}
-            loading={checkinMutation.isPending}
-            disabled={checkedIn}
-          />
-          <TouchableOpacity onPress={() => router.push('/(app)/modes/club-mates')} style={styles.findMatesBtn}>
-            <Ionicons name="people-outline" size={16} color={colors.accent} />
-            <Text style={styles.findMatesText}>Find Club Mates Here</Text>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
+
+        {/* Venue info */}
+        {(venue.description || venue.tags.length > 0 || venue.address) ? (
+          <Animated.View entering={FadeInDown.delay(130)} style={s.infoCard}>
+            {venue.address ? (
+              <View style={s.addressRow}>
+                <Ionicons name="location-outline" size={15} color={light.textTer} />
+                <Text style={s.addressText}>{venue.address}</Text>
+              </View>
+            ) : null}
+            {venue.description ? (
+              <Text style={s.descText}>{venue.description}</Text>
+            ) : null}
+            {venue.tags.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
+                {venue.tags.map((t) => (
+                  <View key={t} style={s.tag}>
+                    <Text style={s.tagText}>{t}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : null}
+            {venue.peakTime ? (
+              <View style={s.peakRow}>
+                <Ionicons name="time-outline" size={14} color={light.amber} />
+                <Text style={s.peakText}>Peak time: {venue.peakTime}</Text>
+              </View>
+            ) : null}
+          </Animated.View>
+        ) : null}
+
+        {/* Club Mates section */}
+        <Animated.View entering={FadeInDown.delay(160)} style={s.sectionCard}>
+          <View style={s.sectionHeader}>
+            <Text style={s.sectionTitle}>Club Mates</Text>
+            <Text style={s.sectionSub}>{clubMatesBroadcasts.length} looking to connect</Text>
+          </View>
+
+          {clubMatesBroadcasts.length === 0 ? (
+            <View style={s.emptyMates}>
+              <Text style={{ fontSize: 32 }}>🎉</Text>
+              <Text style={s.emptyMatesText}>Be the first to broadcast here!</Text>
+              <TouchableOpacity
+                style={s.broadcastBtn}
+                onPress={() => router.push('/(app)/modes/club-mates' as any)}
+              >
+                <Ionicons name="radio-outline" size={16} color={light.primary} />
+                <Text style={s.broadcastBtnText}>Broadcast Yourself</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {clubMatesBroadcasts.map((b) => (
+                <ClubMateCard
+                  key={b.id}
+                  broadcast={b}
+                  onJoin={() => handleJoin(b.id)}
+                  isJoining={joiningId === b.id}
+                />
+              ))}
+              <TouchableOpacity
+                style={[s.broadcastBtn, { alignSelf: 'flex-start', marginTop: 12 }]}
+                onPress={() => router.push('/(app)/modes/club-mates' as any)}
+              >
+                <Ionicons name="add-circle-outline" size={16} color={light.primary} />
+                <Text style={s.broadcastBtnText}>Add My Broadcast</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </Animated.View>
       </ScrollView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  photoHeader: { height: SCREEN_HEIGHT * 0.38, position: 'relative' },
-  headerOverlay: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-  happeningBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
-  happeningDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.danger },
-  happeningText: { color: '#FFF', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  nameOverlay: { position: 'absolute', bottom: 16, left: 16, right: 16 },
-  placeEmoji: { fontSize: 28, marginBottom: 4 },
-  placeName: { color: '#FFF', fontSize: 26, fontWeight: '800' },
-  placeAddr: { color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 2 },
-  content: { flex: 1 },
-  scoresCard: { marginHorizontal: 16, marginTop: 16, marginBottom: 10 },
-  scoresRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  scoreDivider: { width: 1, height: 60, backgroundColor: colors.border },
-  activeUsersRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
-  activeUsersText: { color: colors.accent, fontSize: 13, fontWeight: '600' },
-  infoCard: { marginHorizontal: 16, marginBottom: 10, gap: 10 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  infoItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  infoText: { color: colors.subtext, fontSize: 13 },
-  typeChip: { color: colors.primary, fontSize: 11, fontWeight: '700', backgroundColor: `${colors.primary}22`, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  description: { color: colors.subtext, fontSize: 14, lineHeight: 22 },
-  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tag: { backgroundColor: colors.surface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: colors.border },
-  tagText: { color: colors.subtext, fontSize: 12 },
-  usersCard: { marginHorizontal: 16, marginBottom: 10 },
-  usersTitle: { color: colors.text, fontSize: 15, fontWeight: '700', marginBottom: 10 },
-  avatarsRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  moreAvatars: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  moreText: { color: colors.subtext, fontSize: 11, fontWeight: '700' },
-  mapCard: { marginHorizontal: 16, marginBottom: 10 },
-  mapPlaceholder: { height: 120, alignItems: 'center', justifyContent: 'center', gap: 6 },
-  mapPlaceholderText: { color: colors.text, fontSize: 13, textAlign: 'center' },
-  mapNote: { color: colors.subtext, fontSize: 11 },
-  checkInWrapper: { paddingHorizontal: 16, gap: 12, marginTop: 4 },
-  findMatesBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  findMatesText: { color: colors.accent, fontSize: 14, fontWeight: '600' },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: light.bg },
+  hero: { height: H * 0.38, position: 'relative' },
+  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 },
+  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(239,68,68,0.2)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.5)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
+  liveDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: light.danger },
+  liveText: { color: light.danger, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  photoDots: { position: 'absolute', top: 10, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 5 },
+  photoDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
+  photoDotActive: { backgroundColor: '#FFF', width: 16 },
+  heroBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 18, gap: 4 },
+  venueName: { color: '#FFF', fontSize: 24, fontWeight: '800', letterSpacing: -0.4 },
+  venueCategory: { color: 'rgba(255,255,255,0.7)', fontSize: 13 },
+  heroMeta: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
+  heroBadge: { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 8, paddingHorizontal: 9, paddingVertical: 4 },
+  heroBadgeText: { fontSize: 12, fontWeight: '700' },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  ratingText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  heroMetaText: { color: 'rgba(255,255,255,0.75)', fontSize: 12 },
+
+  scoreCard: { margin: 16, backgroundColor: light.card, borderRadius: 20, padding: 16, gap: 12, borderWidth: 1, borderColor: light.border, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
+  activeRow: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 10, borderTopWidth: 1, borderTopColor: light.border },
+  activeText: { color: light.success, fontSize: 13, fontWeight: '600' },
+
+  checkInBtn: { backgroundColor: light.primary, borderRadius: 16, paddingVertical: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, shadowColor: light.primary, shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 5 },
+  checkInText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+
+  infoCard: { marginHorizontal: 16, backgroundColor: light.card, borderRadius: 20, padding: 16, gap: 8, borderWidth: 1, borderColor: light.border, marginBottom: 12 },
+  addressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  addressText: { color: light.textSec, fontSize: 13, flex: 1 },
+  descText: { color: light.textSec, fontSize: 14, lineHeight: 22 },
+  tag: { backgroundColor: light.surface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, marginRight: 6, borderWidth: 1, borderColor: light.border },
+  tagText: { color: light.textTer, fontSize: 12 },
+  peakRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  peakText: { color: light.amber, fontSize: 13, fontWeight: '600' },
+
+  sectionCard: { marginHorizontal: 16, backgroundColor: light.card, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: light.border, marginBottom: 12 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 },
+  sectionTitle: { color: light.text, fontSize: 17, fontWeight: '800' },
+  sectionSub: { color: light.textTer, fontSize: 12 },
+  emptyMates: { alignItems: 'center', gap: 8, paddingVertical: 20 },
+  emptyMatesText: { color: light.textTer, fontSize: 14 },
+  broadcastBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: light.primaryLight, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9 },
+  broadcastBtnText: { color: light.primary, fontSize: 13, fontWeight: '700' },
 });

@@ -14,6 +14,7 @@ const MODE_CONFIG: Record<Mode, { label: string; color: string; emoji: string }>
   'night-out':  { label: 'Night Out',  color: '#7C3AED', emoji: '🌙' },
   'club-mates': { label: 'Club Mates', color: '#00E5FF', emoji: '🎵' },
   casual:       { label: 'Casual',     color: '#A1A1AA', emoji: '👋' },
+  happening:    { label: 'Happening',  color: '#F59E0B', emoji: '⚡' },
 };
 
 export function ModeChip({ mode, size = 'sm' }: ModeChipProps) {

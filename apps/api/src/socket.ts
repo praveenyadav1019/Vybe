@@ -2,6 +2,227 @@ import type { Server, Socket } from "socket.io";
 import type { FastifyInstance } from "fastify";
 import jwt from "jsonwebtoken";
 
+// ─── Stranger Chat Types ──────────────────────────────────────────────────────
+
+interface QueuePreferences {
+  mode:       "text" | "video" | "audio";
+  genderPref: "everyone" | "male" | "female";
+  nearbyOnly: boolean;
+  lat?:       number;
+  lng?:       number;
+  country:    string;
+  interests:  string[];
+}
+
+interface QueueEntry {
+  userId:    string;
+  prefs:     QueuePreferences;
+  gender?:   string; // profile gender for matching
+  joinedAt:  number; // epoch ms
+}
+
+interface ActiveStrangerSession {
+  sessionId: string;
+  partnerId: string;
+  roomId:    string;
+  mode:      string;
+  startedAt: number;
+}
+
+// ─── Matchmaking Helpers ──────────────────────────────────────────────────────
+
+function genderCompatible(
+  myPref: string,
+  theirPref: string,
+  myGender?: string,
+  theirGender?: string
+): boolean {
+  // Both must accept each other's gender
+  const iAcceptThem =
+    myPref === "everyone" || myGender === undefined || theirGender === myPref;
+  const theyAcceptMe =
+    theirPref === "everyone" || theirGender === undefined || myGender === theirPref;
+  return iAcceptThem && theyAcceptMe;
+}
+
+function interestScore(a: string[], b: string[]): number {
+  if (!a.length || !b.length) return 0;
+  const setA = new Set(a.map((s) => s.toLowerCase()));
+  return b.filter((s) => setA.has(s.toLowerCase())).length;
+}
+
+async function getStrangerSession(
+  redis: FastifyInstance["redis"],
+  userId: string
+): Promise<ActiveStrangerSession | null> {
+  const raw = await redis.get(`stranger:session:${userId}`);
+  return raw ? (JSON.parse(raw) as ActiveStrangerSession) : null;
+}
+
+async function clearStrangerSession(
+  redis: FastifyInstance["redis"],
+  userId: string,
+  partnerId: string
+): Promise<void> {
+  await redis.del(`stranger:session:${userId}`, `stranger:session:${partnerId}`);
+}
+
+async function removeFromQueue(
+  redis: FastifyInstance["redis"],
+  userId: string
+): Promise<void> {
+  await redis.del(`stranger:q:${userId}`);
+  await redis.srem("stranger:queued", userId);
+}
+
+// ─── Core matchmaking ─────────────────────────────────────────────────────────
+
+async function tryMatch(
+  io: Server,
+  app: FastifyInstance,
+  userId: string,
+  prefs: QueuePreferences,
+  myGender?: string
+): Promise<void> {
+  const candidateIds = await app.redis.smembers("stranger:queued");
+
+  // Sort candidates: nearby first (if nearbyOnly or lat/lng present), then by interest overlap
+  const candidates: Array<{ id: string; entry: QueueEntry; score: number }> = [];
+
+  for (const cId of candidateIds) {
+    if (cId === userId) continue;
+
+    const raw = await app.redis.get(`stranger:q:${cId}`);
+    if (!raw) {
+      await app.redis.srem("stranger:queued", cId); // stale
+      continue;
+    }
+
+    const entry: QueueEntry = JSON.parse(raw);
+
+    // Mode must match
+    if (entry.prefs.mode !== prefs.mode) continue;
+
+    // Country must match (unless nearbyOnly overrides)
+    if (!prefs.nearbyOnly && entry.prefs.country !== prefs.country) continue;
+
+    // Gender preference compatibility
+    if (!genderCompatible(prefs.genderPref, entry.prefs.genderPref, myGender, entry.gender))
+      continue;
+
+    // Nearby-only constraint
+    if (prefs.nearbyOnly && prefs.lat != null && prefs.lng != null) {
+      if (entry.prefs.lat == null || entry.prefs.lng == null) continue;
+      const dist = haversineKm(prefs.lat, prefs.lng, entry.prefs.lat, entry.prefs.lng);
+      if (dist > 5) continue; // 5 km
+    }
+
+    // Score: interest overlap + recency
+    const score =
+      interestScore(prefs.interests, entry.prefs.interests) * 10 +
+      (Date.now() - entry.joinedAt < 30_000 ? 5 : 0); // bonus for fresh entries
+
+    candidates.push({ id: cId, entry, score });
+  }
+
+  if (!candidates.length) {
+    // No match — broadcast queue position to user
+    const position = await app.redis.scard("stranger:queued");
+    io.to(`user:${userId}`).emit("stranger:queue-update", {
+      position,
+      searching: true,
+    });
+    return;
+  }
+
+  // Pick best scoring candidate
+  candidates.sort((a, b) => b.score - a.score);
+  const matched = candidates[0];
+
+  // Atomically remove both from queue
+  await Promise.all([
+    removeFromQueue(app.redis, userId),
+    removeFromQueue(app.redis, matched.id),
+  ]);
+
+  // Create DB session
+  const session = await app.prisma.strangerSession.create({
+    data: {
+      userAId: userId,
+      userBId: matched.id,
+      mode:    prefs.mode,
+    },
+  });
+
+  // Store active session state for both users in Redis (2h TTL)
+  const sessionPayloadA: ActiveStrangerSession = {
+    sessionId: session.id,
+    partnerId: matched.id,
+    roomId:    session.roomId,
+    mode:      prefs.mode,
+    startedAt: Date.now(),
+  };
+  const sessionPayloadB: ActiveStrangerSession = {
+    sessionId: session.id,
+    partnerId: userId,
+    roomId:    session.roomId,
+    mode:      prefs.mode,
+    startedAt: Date.now(),
+  };
+
+  await Promise.all([
+    app.redis.set(`stranger:session:${userId}`, JSON.stringify(sessionPayloadA), "EX", 7200),
+    app.redis.set(`stranger:session:${matched.id}`, JSON.stringify(sessionPayloadB), "EX", 7200),
+  ]);
+
+  // Fetch profile info (anonymous display — no real name/photo until friend request)
+  const [profileA, profileB] = await Promise.all([
+    app.prisma.profile.findUnique({ where: { userId }, select: { age: true, interests: true, mode: true } }),
+    app.prisma.profile.findUnique({ where: { userId: matched.id }, select: { age: true, interests: true, mode: true } }),
+  ]);
+
+  const sharedInterests = (profileA?.interests ?? []).filter((i) =>
+    (profileB?.interests ?? []).map((x) => x.toLowerCase()).includes(i.toLowerCase())
+  );
+
+  // Emit matched event to both
+  io.to(`user:${userId}`).emit("stranger:matched", {
+    sessionId: session.id,
+    roomId:    session.roomId,
+    mode:      prefs.mode,
+    partner: {
+      age:             profileB?.age ?? null,
+      sharedInterests: sharedInterests.slice(0, 3),
+      mode:            profileB?.mode ?? "happening",
+    },
+  });
+
+  io.to(`user:${matched.id}`).emit("stranger:matched", {
+    sessionId: session.id,
+    roomId:    session.roomId,
+    mode:      prefs.mode,
+    partner: {
+      age:             profileA?.age ?? null,
+      sharedInterests: sharedInterests.slice(0, 3),
+      mode:            profileA?.mode ?? "happening",
+    },
+  });
+
+  app.log.info({ sessionId: session.id, userAId: userId, userBId: matched.id }, "Stranger matched");
+}
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface SocketData {
@@ -23,6 +244,13 @@ export function attachSocketIO(io: Server, app: FastifyInstance): void {
         (socket.handshake.headers?.authorization ?? "").replace("Bearer ", "");
 
       if (!token) throw new Error("Unauthorized – no token");
+
+      // Dev bypass: allow the hardcoded test token without JWT verification
+      if (app.env.NODE_ENV !== "production" && token === "dev-access-token") {
+        (socket.data as SocketData).userId = "dev-user-1";
+        next();
+        return;
+      }
 
       const decoded = jwt.verify(token, app.env.JWT_SECRET) as {
         sub?: string;
@@ -342,9 +570,395 @@ export function attachSocketIO(io: Server, app: FastifyInstance): void {
       }
     );
 
+    // ── radar:ping ─────────────────────────────────────────────────────────
+    socket.on("radar:ping", async (payload: { targetUserId: string }) => {
+      try {
+        if (!payload.targetUserId) return;
+        const rlKey = `vybeon:radarping:${userId}:${payload.targetUserId}`;
+        const exists = await app.redis.exists(rlKey);
+        if (exists) return; // already pinged this user recently
+        await app.redis.set(rlKey, "1", "EX", 300); // 5 min cooldown
+
+        const profile = await app.prisma.profile.findUnique({ where: { userId } });
+        io.to(`user:${payload.targetUserId}`).emit("radar:pinged", {
+          fromUserId: userId,
+          fromName: profile?.name ?? "Someone",
+          fromPhoto: profile?.photos[0] ?? null,
+        });
+      } catch (e) {
+        app.log.error(e, "radar:ping failed");
+      }
+    });
+
+    // ── party:join-room — subscribe to party updates ──────────────────────
+    socket.on("party:join-room", (payload: { partyId: string }) => {
+      if (!payload.partyId) return;
+      void socket.join(`party:${payload.partyId}`);
+    });
+
+    socket.on("party:leave-room", (payload: { partyId: string }) => {
+      if (!payload.partyId) return;
+      void socket.leave(`party:${payload.partyId}`);
+    });
+
+    // ── connections:update — broadcast when a new connection is made ───────
+    socket.on("connections:request-update", async () => {
+      try {
+        const count = await app.prisma.connection.count({
+          where: { OR: [{ userAId: userId }, { userBId: userId }] },
+        });
+        socket.emit("connections:update", { total: count });
+      } catch (e) {
+        app.log.error(e, "connections:request-update failed");
+      }
+    });
+
+    // ── venue:activity ─────────────────────────────────────────────────────
+    socket.on("venue:join", async (payload: { placeId: string }) => {
+      try {
+        if (!payload.placeId) return;
+        void socket.join(`venue:${payload.placeId}`);
+        socket.to(`venue:${payload.placeId}`).emit("venue:activity", {
+          type: "user_joined",
+          placeId: payload.placeId,
+        });
+      } catch (e) {
+        app.log.error(e, "venue:join failed");
+      }
+    });
+
+    socket.on("venue:leave", (payload: { placeId: string }) => {
+      if (!payload.placeId) return;
+      void socket.leave(`venue:${payload.placeId}`);
+    });
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ── STRANGER CHAT ─────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+
+    // stranger:join-queue — user wants to find a random match
+    socket.on("stranger:join-queue", async (payload: Partial<QueuePreferences>) => {
+      try {
+        // Rate limit: 30 queue joins per hour
+        const rlKey = `vybeon:sq_rl:${userId}`;
+        const rlCount = await app.redis.incr(rlKey);
+        if (rlCount === 1) await app.redis.expire(rlKey, 3600);
+        if (rlCount > 30) {
+          socket.emit("stranger:error", { code: "RATE_LIMITED", message: "Too many queue joins. Please wait." });
+          return;
+        }
+
+        // End any existing session before joining queue
+        const existingSession = await getStrangerSession(app.redis, userId);
+        if (existingSession) {
+          await endStrangerSession(io, app, userId, existingSession, "new_queue");
+        }
+
+        // Fetch profile gender for matching
+        const profile = await app.prisma.profile.findUnique({
+          where: { userId },
+          select: { gender: true, interests: true },
+        });
+
+        const prefs: QueuePreferences = {
+          mode:       payload.mode ?? "text",
+          genderPref: payload.genderPref ?? "everyone",
+          nearbyOnly: payload.nearbyOnly ?? false,
+          lat:        payload.lat,
+          lng:        payload.lng,
+          country:    payload.country ?? "IN",
+          interests:  profile?.interests ?? [],
+        };
+
+        const entry: QueueEntry = {
+          userId,
+          prefs,
+          gender:   profile?.gender ?? undefined,
+          joinedAt: Date.now(),
+        };
+
+        // Store in queue (5 min TTL — auto-cleanup if client drops)
+        await app.redis.set(`stranger:q:${userId}`, JSON.stringify(entry), "EX", 300);
+        await app.redis.sadd("stranger:queued", userId);
+
+        // Try to find a match immediately
+        await tryMatch(io, app, userId, prefs, profile?.gender ?? undefined);
+      } catch (e) {
+        app.log.error(e, "stranger:join-queue failed");
+        socket.emit("stranger:error", { code: "SERVER_ERROR", message: "Failed to join queue" });
+      }
+    });
+
+    // stranger:leave-queue — user cancels search
+    socket.on("stranger:leave-queue", async () => {
+      try {
+        await removeFromQueue(app.redis, userId);
+        socket.emit("stranger:queue-update", { position: 0, searching: false });
+      } catch (e) {
+        app.log.error(e, "stranger:leave-queue failed");
+      }
+    });
+
+    // stranger:next — skip current partner and re-queue
+    socket.on("stranger:next", async (payload: { preferences?: Partial<QueuePreferences> }) => {
+      try {
+        const session = await getStrangerSession(app.redis, userId);
+        if (!session) {
+          socket.emit("stranger:error", { code: "NO_SESSION", message: "No active session" });
+          return;
+        }
+
+        // End current session
+        await endStrangerSession(io, app, userId, session, "skipped");
+
+        // Re-queue with same or updated preferences
+        const profile = await app.prisma.profile.findUnique({
+          where: { userId },
+          select: { gender: true, interests: true },
+        });
+
+        const prefs: QueuePreferences = {
+          mode:       (payload.preferences?.mode ?? session.mode) as QueuePreferences["mode"],
+          genderPref: payload.preferences?.genderPref ?? "everyone",
+          nearbyOnly: payload.preferences?.nearbyOnly ?? false,
+          lat:        payload.preferences?.lat,
+          lng:        payload.preferences?.lng,
+          country:    payload.preferences?.country ?? "IN",
+          interests:  profile?.interests ?? [],
+        };
+
+        const entry: QueueEntry = {
+          userId,
+          prefs,
+          gender:   profile?.gender ?? undefined,
+          joinedAt: Date.now(),
+        };
+
+        await app.redis.set(`stranger:q:${userId}`, JSON.stringify(entry), "EX", 300);
+        await app.redis.sadd("stranger:queued", userId);
+
+        await tryMatch(io, app, userId, prefs, profile?.gender ?? undefined);
+      } catch (e) {
+        app.log.error(e, "stranger:next failed");
+      }
+    });
+
+    // stranger:end — end session without re-queuing
+    socket.on("stranger:end", async () => {
+      try {
+        const session = await getStrangerSession(app.redis, userId);
+        if (!session) return;
+        await endStrangerSession(io, app, userId, session, "ended");
+      } catch (e) {
+        app.log.error(e, "stranger:end failed");
+      }
+    });
+
+    // stranger:message — send a message in the current stranger session
+    socket.on("stranger:message", async (payload: { content: string; type?: string }) => {
+      try {
+        const session = await getStrangerSession(app.redis, userId);
+        if (!session) {
+          socket.emit("stranger:error", { code: "NO_SESSION", message: "No active session" });
+          return;
+        }
+
+        if (!payload.content?.trim()) return;
+        const content = payload.content.trim().slice(0, 2000);
+
+        // Rate limit: 60 messages per minute
+        const rlKey = `vybeon:sm_rl:${userId}`;
+        const rlCount = await app.redis.incr(rlKey);
+        if (rlCount === 1) await app.redis.expire(rlKey, 60);
+        if (rlCount > 60) {
+          socket.emit("stranger:error", { code: "RATE_LIMITED", message: "Slow down" });
+          return;
+        }
+
+        const msg = await app.prisma.strangerMessage.create({
+          data: {
+            sessionId: session.sessionId,
+            senderId:  userId,
+            content,
+            type:      payload.type ?? "text",
+          },
+        });
+
+        const outbound = {
+          id:        msg.id,
+          sessionId: session.sessionId,
+          senderId:  userId,
+          content,
+          type:      msg.type,
+          createdAt: msg.createdAt,
+        };
+
+        // Send to both participants
+        socket.emit("stranger:message", outbound);
+        io.to(`user:${session.partnerId}`).emit("stranger:message", outbound);
+      } catch (e) {
+        app.log.error(e, "stranger:message failed");
+      }
+    });
+
+    // stranger:typing — relay typing indicator to partner
+    socket.on("stranger:typing", async (payload: { isTyping: boolean }) => {
+      try {
+        const session = await getStrangerSession(app.redis, userId);
+        if (!session) return;
+        io.to(`user:${session.partnerId}`).emit("stranger:typing", {
+          userId,
+          isTyping: payload.isTyping,
+        });
+      } catch (e) {
+        app.log.error(e, "stranger:typing failed");
+      }
+    });
+
+    // stranger:friend-request — send friend/ping request to current stranger
+    socket.on("stranger:friend-request", async () => {
+      try {
+        const session = await getStrangerSession(app.redis, userId);
+        if (!session) {
+          socket.emit("stranger:error", { code: "NO_SESSION", message: "No active session" });
+          return;
+        }
+
+        // Check if already friends / request pending
+        const existing = await app.prisma.matchRequest.findFirst({
+          where: {
+            OR: [
+              { fromUserId: userId, toUserId: session.partnerId },
+              { fromUserId: session.partnerId, toUserId: userId },
+            ],
+          },
+        });
+
+        if (existing) {
+          socket.emit("stranger:error", { code: "ALREADY_REQUESTED", message: "Request already sent" });
+          return;
+        }
+
+        await app.prisma.matchRequest.create({
+          data: {
+            fromUserId: userId,
+            toUserId:   session.partnerId,
+            message:    "We met in random chat 👋",
+          },
+        });
+
+        // Notify the partner
+        const myProfile = await app.prisma.profile.findUnique({
+          where:  { userId },
+          select: { name: true, photos: true, age: true },
+        });
+
+        io.to(`user:${session.partnerId}`).emit("stranger:friend-request", {
+          fromUserId: userId,
+          fromName:   myProfile?.name ?? "Someone",
+          fromPhoto:  myProfile?.photos[0] ?? null,
+          fromAge:    myProfile?.age ?? null,
+          sessionId:  session.sessionId,
+        });
+
+        socket.emit("stranger:friend-request-sent", { partnerId: session.partnerId });
+      } catch (e) {
+        app.log.error(e, "stranger:friend-request failed");
+      }
+    });
+
+    // stranger:upgrade-video — upgrade current text session to video
+    socket.on("stranger:upgrade-video", async () => {
+      try {
+        const session = await getStrangerSession(app.redis, userId);
+        if (!session) return;
+
+        // Generate Agora token if configured
+        let agoraToken: string | null = null;
+        const { AGORA_APP_ID, AGORA_APP_CERTIFICATE } = app.env;
+        if (AGORA_APP_ID && AGORA_APP_CERTIFICATE) {
+          try {
+            const { RtcTokenBuilder, RtcRole } = await import("agora-token");
+            const expireTs = Math.floor(Date.now() / 1000) + 3600;
+            agoraToken = RtcTokenBuilder.buildTokenWithUid(
+              AGORA_APP_ID,
+              AGORA_APP_CERTIFICATE,
+              session.roomId,
+              0,
+              RtcRole.PUBLISHER,
+              expireTs,
+              expireTs
+            );
+          } catch {
+            app.log.warn("Agora token generation failed – proceeding without");
+          }
+        }
+
+        // Update session mode
+        await app.prisma.strangerSession.update({
+          where: { id: session.sessionId },
+          data:  { mode: "video" },
+        });
+
+        const upgradePayload = {
+          sessionId:  session.sessionId,
+          roomId:     session.roomId,
+          agoraToken,
+          agoraAppId: AGORA_APP_ID ?? null,
+        };
+
+        socket.emit("stranger:video-ready", upgradePayload);
+        io.to(`user:${session.partnerId}`).emit("stranger:video-ready", upgradePayload);
+      } catch (e) {
+        app.log.error(e, "stranger:upgrade-video failed");
+      }
+    });
+
+    // WebRTC relay for stranger peer connections (when Agora is not available)
+    socket.on("stranger:webrtc-offer", async (p: { sdp: unknown }) => {
+      const session = await getStrangerSession(app.redis, userId).catch(() => null);
+      if (!session) return;
+      io.to(`user:${session.partnerId}`).emit("stranger:webrtc-offer", {
+        fromUserId: userId,
+        sdp: p.sdp,
+      });
+    });
+
+    socket.on("stranger:webrtc-answer", async (p: { sdp: unknown }) => {
+      const session = await getStrangerSession(app.redis, userId).catch(() => null);
+      if (!session) return;
+      io.to(`user:${session.partnerId}`).emit("stranger:webrtc-answer", {
+        fromUserId: userId,
+        sdp: p.sdp,
+      });
+    });
+
+    socket.on("stranger:webrtc-ice", async (p: { candidate: unknown }) => {
+      const session = await getStrangerSession(app.redis, userId).catch(() => null);
+      if (!session) return;
+      io.to(`user:${session.partnerId}`).emit("stranger:webrtc-ice", {
+        fromUserId: userId,
+        candidate: p.candidate,
+      });
+    });
+
     // ── disconnect ────────────────────────────────────────────────────────
     socket.on("disconnect", async () => {
       app.log.info({ userId, socketId: socket.id }, "Socket disconnected");
+
+      // Clean up stranger queue / session on disconnect
+      void (async () => {
+        try {
+          await removeFromQueue(app.redis, userId);
+          const session = await getStrangerSession(app.redis, userId);
+          if (session) {
+            await endStrangerSession(io, app, userId, session, "disconnected");
+          }
+        } catch (e) {
+          app.log.warn(e, "Stranger cleanup on disconnect failed");
+        }
+      })();
+
       try {
         await app.redis.del(`vybeon:online:${userId}`);
         await app.prisma.user.update({
@@ -359,6 +973,42 @@ export function attachSocketIO(io: Server, app: FastifyInstance): void {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * End a stranger session: persist to DB, notify partner, cleanup Redis.
+ */
+async function endStrangerSession(
+  io: Server,
+  app: FastifyInstance,
+  endingUserId: string,
+  session: ActiveStrangerSession,
+  reason: string
+): Promise<void> {
+  const durationSec = Math.floor((Date.now() - session.startedAt) / 1000);
+
+  await Promise.allSettled([
+    app.prisma.strangerSession.update({
+      where: { id: session.sessionId },
+      data: {
+        status:   reason === "reported" ? "reported" : reason === "new_queue" ? "ended" : "ended",
+        endedAt:  new Date(),
+        endedBy:  endingUserId,
+        duration: durationSec,
+        skipCount: reason === "skipped"
+          ? { increment: 1 }
+          : undefined,
+      },
+    }),
+    clearStrangerSession(app.redis, endingUserId, session.partnerId),
+  ]);
+
+  // Notify partner their session ended
+  io.to(`user:${session.partnerId}`).emit("stranger:session-ended", {
+    sessionId: session.sessionId,
+    reason,
+    duration: durationSec,
+  });
+}
 
 /**
  * After a location update, find nearby users subscribed to nearby events

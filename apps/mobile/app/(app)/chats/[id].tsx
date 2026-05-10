@@ -618,7 +618,7 @@ export default function ChatScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
+          <Ionicons name="chevron-back" size={24} color="#1A1A2E" />
         </Pressable>
 
         <Pressable
@@ -648,13 +648,13 @@ export default function ChatScreen() {
 
         <View style={styles.headerActions}>
           <Pressable style={styles.iconBtn} onPress={handleAudioCall}>
-            <Ionicons name="call-outline" size={21} color={colors.text} />
+            <Ionicons name="call-outline" size={21} color="#1A1A2E" />
           </Pressable>
           <Pressable style={styles.iconBtn} onPress={handleVideoCall}>
-            <Ionicons name="videocam-outline" size={21} color={colors.text} />
+            <Ionicons name="videocam-outline" size={21} color="#1A1A2E" />
           </Pressable>
           <Pressable style={styles.iconBtn} onPress={() => setMenuVisible(true)}>
-            <Ionicons name="ellipsis-vertical" size={21} color={colors.text} />
+            <Ionicons name="ellipsis-vertical" size={21} color="#1A1A2E" />
           </Pressable>
         </View>
       </View>
@@ -766,7 +766,7 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#FFFFFF',
   },
 
   // Header
@@ -776,7 +776,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
   },
   backBtn: {
     width: 36,
@@ -801,12 +802,12 @@ const styles = StyleSheet.create({
   headerName: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: '#1A1A2E',
     maxWidth: 150,
   },
   headerStatus: {
     fontSize: 11,
-    color: colors.success,
+    color: '#10B981',
     marginTop: 1,
   },
   headerActions: {
@@ -869,10 +870,8 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 6,
   },
   bubbleOther: {
-    backgroundColor: colors.surface,
+    backgroundColor: '#F3F4F6',
     borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   bubbleGroupedOther: {
     borderTopLeftRadius: 6,
@@ -884,7 +883,7 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   bubbleTextOther: {
-    color: colors.text,
+    color: '#1A1A2E',
     fontSize: 15,
     lineHeight: 21,
   },
@@ -917,11 +916,11 @@ const styles = StyleSheet.create({
   separatorLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: '#E5E7EB',
   },
   separatorText: {
     fontSize: 11,
-    color: colors.subtext,
+    color: '#9CA3AF',
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
@@ -938,13 +937,11 @@ const styles = StyleSheet.create({
   typingBubble: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: '#F3F4F6',
     borderRadius: 18,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   typingDot: {
     width: 7,
@@ -965,8 +962,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: 'rgba(10,10,10,0.95)',
+    borderTopColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
     gap: 6,
   },
   inputIconBtn: {
@@ -980,10 +977,8 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    backgroundColor: colors.surface,
+    backgroundColor: '#F3F4F6',
     borderRadius: 22,
-    borderWidth: 1,
-    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 8,
     minHeight: 44,
@@ -991,7 +986,7 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
-    color: colors.text,
+    color: '#1A1A2E',
     fontSize: 15,
     lineHeight: 20,
     maxHeight: 100,
@@ -1030,13 +1025,13 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   menuSheet: {
-    backgroundColor: colors.card,
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingBottom: 40,
     paddingTop: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: '#E5E7EB',
   },
   menuItem: {
     flexDirection: 'row',

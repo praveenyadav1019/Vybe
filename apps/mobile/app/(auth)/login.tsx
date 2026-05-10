@@ -1,394 +1,536 @@
+/**
+ * Authentication Welcome Screen
+ * Pixel-perfect recreation of the reference design (authentication_screen/screen.png).
+ *
+ * Layout:
+ *  ┌─────────────────────────────────┐
+ *  │  Photo / gradient area  (~52%)  │  ← dark social-scene gradient
+ *  │        VYBEON wordmark          │
+ *  ├─────────────────────────────────┤
+ *  │         "Sign In"  h2           │
+ *  │      [ Sign In  ]  outline btn  │  white section
+ *  │  [ Create Account ] gold btn    │
+ *  │      — Or continue with —       │
+ *  │        🍎      G                │
+ *  │   terms & privacy footnote      │
+ *  └─────────────────────────────────┘
+ *
+ * "Sign In" press → expands an inline phone-input panel (slide-up)
+ * "Create Account" → /(auth)/onboarding
+ */
+
 import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
+  StyleSheet,
+  Dimensions,
+  TouchableOpacity,
+  TextInput,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  TextInput,
-  Animated,
+  StatusBar,
+  Pressable,
+  ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { apiFetch } from '@/lib/api';
-import { colors } from '@/theme/colors';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import { C, T, S, R, SH, ANIM, DIM } from '@/design/tokens';
+
+const { width, height } = Dimensions.get('window');
+
+// Hero section takes 52% of screen height
+const HERO_H = height * 0.52;
+// Phone panel expansion height
+const PHONE_PANEL_H = 200;
 
 const COUNTRY_CODES = [
-  { code: '+91', flag: '🇮🇳', name: 'India', maxLen: 10 },
-  { code: '+1', flag: '🇺🇸', name: 'USA', maxLen: 10 },
-  { code: '+44', flag: '🇬🇧', name: 'UK', maxLen: 10 },
-  { code: '+971', flag: '🇦🇪', name: 'UAE', maxLen: 9 },
-  { code: '+65', flag: '🇸🇬', name: 'Singapore', maxLen: 8 },
-  { code: '+61', flag: '🇦🇺', name: 'Australia', maxLen: 9 },
+  { code: '+91',  flag: '🇮🇳', name: 'India',     maxLen: 10 },
+  { code: '+1',   flag: '🇺🇸', name: 'USA',       maxLen: 10 },
+  { code: '+44',  flag: '🇬🇧', name: 'UK',        maxLen: 10 },
+  { code: '+971', flag: '🇦🇪', name: 'UAE',       maxLen: 9  },
+  { code: '+65',  flag: '🇸🇬', name: 'Singapore', maxLen: 8  },
+  { code: '+61',  flag: '🇦🇺', name: 'Australia', maxLen: 9  },
 ];
 
-export default function LoginScreen() {
-  const router = useRouter();
-  const [selectedCountry, setSelectedCountry] = useState(COUNTRY_CODES[0]);
-  const [phone, setPhone] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [showCountryPicker, setShowCountryPicker] = useState(false);
+// ─── Social button ─────────────────────────────────────────────────────────────
 
-  const phoneInputRef = useRef<TextInput>(null);
+function SocialBtn({
+  children,
+  onPress,
+  dark,
+}: {
+  children: React.ReactNode;
+  onPress: () => void;
+  dark?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.82}
+      style={[ss.socialBtn, dark ? ss.socialBtnDark : ss.socialBtnLight]}
+    >
+      {children}
+    </TouchableOpacity>
+  );
+}
 
-  const fullPhone = `${selectedCountry.code}${phone}`;
-  const isValid = phone.length === selectedCountry.maxLen && /^\d+$/.test(phone);
+// ─── Main screen ───────────────────────────────────────────────────────────────
+
+export default function AuthWelcomeScreen() {
+  const router   = useRouter();
+  const insets   = useSafeAreaInsets();
+  const phoneRef = useRef<TextInput>(null);
+
+  const [showPhone, setShowPhone]         = useState(false);
+  const [country,   setCountry]           = useState(COUNTRY_CODES[0]);
+  const [phone,     setPhone]             = useState('');
+  const [loading,   setLoading]           = useState(false);
+  const [error,     setError]             = useState<string | null>(null);
+  const [showPicker, setShowPicker]       = useState(false);
+
+  // ── Animation ─────────────────────────────────────────────────────────────
+  const panelH    = useSharedValue(0);
+  const panelOpac = useSharedValue(0);
+
+  const panelStyle = useAnimatedStyle(() => ({
+    height:  panelH.value,
+    opacity: panelOpac.value,
+    overflow: 'hidden',
+  }));
+
+  function openPhonePanel() {
+    setShowPhone(true);
+    panelH.value    = withSpring(PHONE_PANEL_H, ANIM.spring.snappy);
+    panelOpac.value = withTiming(1, { duration: 250, easing: Easing.out(Easing.cubic) });
+    setTimeout(() => phoneRef.current?.focus(), 300);
+  }
+
+  function closePhonePanel() {
+    panelH.value    = withSpring(0, ANIM.spring.snappy);
+    panelOpac.value = withTiming(0, { duration: 180 });
+    setTimeout(() => setShowPhone(false), 220);
+    setPhone('');
+    setError(null);
+  }
+
+  // ── Auth handlers ─────────────────────────────────────────────────────────
+  const fullPhone = `${country.code}${phone}`;
+  const isValid   = phone.length === country.maxLen && /^\d+$/.test(phone);
 
   async function handleSendOtp() {
     if (!isValid) {
-      setError(`Please enter a valid ${selectedCountry.maxLen}-digit phone number`);
+      setError(`Enter a valid ${country.maxLen}-digit number`);
       return;
     }
     setError(null);
     setLoading(true);
-    try {
-      await apiFetch('/auth/send-otp', {
-        method: 'POST',
-        body: JSON.stringify({ phone: fullPhone }),
-      });
-      router.push({
-        pathname: '/(auth)/otp',
-        params: { phone: fullPhone, countryCode: selectedCountry.code },
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to send OTP. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+
+    router.push({ pathname: '/(auth)/otp', params: { phone: fullPhone } });
+
+    apiFetch('/auth/send-otp', {
+      method: 'POST',
+      body: JSON.stringify({ phone: fullPhone }),
+    })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }
 
+  const handleSignIn     = () => (showPhone ? handleSendOtp() : openPhonePanel());
+  const handleCreateAcct = () => router.push('/(auth)/onboarding');
+  const handleSocial     = () => openPhonePanel();
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      {/* Background orbs */}
-      <View style={styles.orb1} />
-      <View style={styles.orb2} />
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: C.bgPrimary }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+    >
+      <StatusBar barStyle="light-content" />
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Header */}
-          <View style={styles.header}>
-            <LinearGradient
-              colors={['#7C3AED', '#00E5FF']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.logoGradient}
-            >
-              <Text style={styles.logoText}>VYBEON</Text>
-            </LinearGradient>
-          </View>
+      {/* ── HERO: gradient simulating nightlife photo ─────────────────────── */}
+      <View style={[s.hero, { paddingTop: insets.top }]}>
+        {/* Background gradient layers */}
+        <LinearGradient
+          colors={['#1A0A35', '#3B1A75', '#7B3FAF', 'rgba(245,240,255,0)']}
+          locations={[0, 0.38, 0.72, 1]}
+          style={StyleSheet.absoluteFillObject}
+        />
 
-          {/* Form card */}
-          <View style={styles.card}>
-            <Text style={styles.headline}>Enter your{'\n'}phone number</Text>
-            <Text style={styles.subtext}>
-              We'll send you a 6-digit code to verify it's really you.
-            </Text>
+        {/* Warm ambient orbs */}
+        <View style={s.orb1} />
+        <View style={s.orb2} />
 
-            {/* Country + Phone row */}
-            <View style={styles.phoneRow}>
-              {/* Country code selector */}
-              <TouchableOpacity
-                style={styles.countrySelector}
-                onPress={() => setShowCountryPicker(!showCountryPicker)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.countryFlag}>{selectedCountry.flag}</Text>
-                <Text style={styles.countryCode}>{selectedCountry.code}</Text>
-                <Ionicons
-                  name={showCountryPicker ? 'chevron-up' : 'chevron-down'}
-                  size={14}
-                  color={colors.subtext}
-                />
-              </TouchableOpacity>
+        {/* VYBEON brand over the hero */}
+        <View style={s.brand}>
+          <Text style={s.brandText}>VYBEON</Text>
+          <Text style={s.brandSub}>Meet. Connect. Vibe.</Text>
+        </View>
+      </View>
 
-              {/* Phone input */}
-              <Input
-                ref={phoneInputRef}
-                containerStyle={styles.phoneInputContainer}
-                placeholder={`${selectedCountry.maxLen}-digit number`}
-                keyboardType="phone-pad"
-                value={phone}
-                onChangeText={(t) => {
-                  const cleaned = t.replace(/\D/g, '').slice(0, selectedCountry.maxLen);
-                  setPhone(cleaned);
-                  if (error) setError(null);
-                }}
-                maxLength={selectedCountry.maxLen}
-                returnKeyType="done"
-                onSubmitEditing={handleSendOtp}
-                style={styles.phoneInput}
-              />
+      {/* ── WHITE CONTENT SECTION ─────────────────────────────────────────── */}
+      <View style={[s.sheet, { paddingBottom: insets.bottom + S[4] }]}>
+
+        {/* Page heading */}
+        <Text style={s.heading}>Sign In</Text>
+
+        {/* ── Animated phone panel ──────────────────────────────────────── */}
+        <Animated.View style={panelStyle}>
+          {/* Country picker row */}
+          {showPicker && (
+            <View style={s.pickerList}>
+              {COUNTRY_CODES.map((c) => (
+                <TouchableOpacity
+                  key={c.code}
+                  style={s.pickerItem}
+                  onPress={() => { setCountry(c); setShowPicker(false); }}
+                >
+                  <Text style={s.pickerFlag}>{c.flag}</Text>
+                  <Text style={s.pickerName}>{c.name}</Text>
+                  <Text style={s.pickerCode}>{c.code}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
+          )}
 
-            {/* Country picker dropdown */}
-            {showCountryPicker && (
-              <View style={styles.countryDropdown}>
-                {COUNTRY_CODES.map((country) => (
-                  <TouchableOpacity
-                    key={country.code}
-                    style={[
-                      styles.countryOption,
-                      selectedCountry.code === country.code && styles.countryOptionActive,
-                    ]}
-                    onPress={() => {
-                      setSelectedCountry(country);
-                      setShowCountryPicker(false);
-                      setPhone('');
-                      phoneInputRef.current?.focus();
-                    }}
-                  >
-                    <Text style={styles.countryOptionFlag}>{country.flag}</Text>
-                    <Text style={styles.countryOptionName}>{country.name}</Text>
-                    <Text style={styles.countryOptionCode}>{country.code}</Text>
-                    {selectedCountry.code === country.code && (
-                      <Ionicons name="checkmark" size={16} color={colors.primary} />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
+          <View style={s.phoneRow}>
+            {/* Country selector */}
+            <TouchableOpacity
+              style={s.countrySel}
+              onPress={() => setShowPicker(!showPicker)}
+              activeOpacity={0.75}
+            >
+              <Text style={s.countryFlag}>{country.flag}</Text>
+              <Text style={s.countryCode}>{country.code}</Text>
+              <Ionicons
+                name={showPicker ? 'chevron-up' : 'chevron-down'}
+                size={13}
+                color={C.textMuted}
+              />
+            </TouchableOpacity>
 
-            {/* Error message */}
-            {error && (
-              <View style={styles.errorBox}>
-                <Ionicons name="alert-circle" size={16} color={colors.danger} />
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
-
-            {/* Send OTP button */}
-            <Button
-              title={loading ? 'Sending...' : 'Send OTP'}
-              onPress={handleSendOtp}
-              disabled={!isValid}
-              loading={loading}
-              gradient
-              style={styles.sendBtn}
+            {/* Phone input */}
+            <TextInput
+              ref={phoneRef}
+              style={s.phoneInput}
+              placeholder="Phone number"
+              placeholderTextColor={C.textPlaceholder}
+              keyboardType="phone-pad"
+              value={phone}
+              onChangeText={(t) => { setPhone(t); setError(null); }}
+              maxLength={country.maxLen}
+              returnKeyType="done"
+              onSubmitEditing={handleSendOtp}
             />
 
-            {/* Phone number display */}
-            {phone.length > 0 && (
-              <Text style={styles.phonePill}>
-                Sending to {selectedCountry.flag} {selectedCountry.code} {phone}
-              </Text>
-            )}
+            {/* Close */}
+            <TouchableOpacity onPress={closePhonePanel} style={s.phoneClose}>
+              <Ionicons name="close-circle" size={20} color={C.textMuted} />
+            </TouchableOpacity>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
 
-      {/* Terms */}
-      <View style={styles.termsContainer}>
-        <Text style={styles.termsText}>
+          {error ? <Text style={s.errorText}>{error}</Text> : null}
+        </Animated.View>
+
+        {/* ── Sign In button ─────────────────────────────────────────────── */}
+        <TouchableOpacity
+          style={s.btnOutline}
+          onPress={handleSignIn}
+          activeOpacity={0.82}
+        >
+          {loading ? (
+            <ActivityIndicator color={C.textPrimary} />
+          ) : (
+            <Text style={s.btnOutlineText}>
+              {showPhone ? 'Continue' : 'Sign In'}
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        {/* ── Create Account button ─────────────────────────────────────── */}
+        <TouchableOpacity
+          style={s.btnGold}
+          onPress={handleCreateAcct}
+          activeOpacity={0.86}
+        >
+          <LinearGradient
+            colors={['#D4A853', '#C9A84C']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={s.btnGoldInner}
+          >
+            <Text style={s.btnGoldText}>Create Account</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* ── Divider ────────────────────────────────────────────────────── */}
+        <View style={s.dividerRow}>
+          <View style={s.dividerLine} />
+          <Text style={s.dividerText}>Or continue with</Text>
+          <View style={s.dividerLine} />
+        </View>
+
+        {/* ── Social buttons ─────────────────────────────────────────────── */}
+        <View style={s.socialRow}>
+          {/* Apple */}
+          <SocialBtn onPress={handleSocial} dark>
+            <Ionicons name="logo-apple" size={22} color="#FFFFFF" />
+          </SocialBtn>
+
+          {/* Google */}
+          <SocialBtn onPress={handleSocial}>
+            <Text style={ss.googleG}>G</Text>
+          </SocialBtn>
+        </View>
+
+        {/* ── Footer ─────────────────────────────────────────────────────── */}
+        <Text style={s.footer}>
           By continuing, you agree to our{' '}
-          <Text style={styles.termsLink}>Terms of Service</Text>
-          {' and '}
-          <Text style={styles.termsLink}>Privacy Policy</Text>
+          <Text style={s.footerLink}>Terms of Service</Text>
+          {' '}and{' '}
+          <Text style={s.footerLink}>Privacy Policy</Text>
+          .
         </Text>
       </View>
-    </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  // ── Hero ──────────────────────────────────────────────────────────────────
+  hero: {
+    height: HERO_H,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+    paddingHorizontal: S.screenH,
+    paddingBottom: S[8],
   },
   orb1: {
     position: 'absolute',
-    width: 320,
-    height: 320,
-    borderRadius: 160,
-    backgroundColor: 'rgba(124,58,237,0.1)',
-    top: -100,
-    right: -100,
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: 'rgba(168,85,247,0.18)',
+    top: -60,
+    right: -80,
   },
   orb2: {
     position: 'absolute',
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    backgroundColor: 'rgba(0,229,255,0.06)',
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(124,58,237,0.14)',
     bottom: 60,
-    left: -80,
+    left: -60,
   },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 24,
-  },
-  header: {
+  brand: {
     alignItems: 'center',
-    marginBottom: 40,
-    marginTop: 12,
   },
-  logoGradient: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+  brandText: {
+    fontSize: T.size['2xl'],
+    fontWeight: T.weight.black,
+    color: '#FFFFFF',
+    letterSpacing: T.tracking.widest,
   },
-  logoText: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: colors.text,
-    letterSpacing: -0.5,
+  brandSub: {
+    fontSize: T.size.sm,
+    fontWeight: T.weight.regular,
+    color: 'rgba(255,255,255,0.65)',
+    marginTop: 4,
+    letterSpacing: 0.4,
   },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 24,
-    shadowColor: colors.primary,
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+
+  // ── White sheet ───────────────────────────────────────────────────────────
+  sheet: {
+    flex: 1,
+    backgroundColor: C.bgPrimary,
+    paddingHorizontal: S.screenH + 4,
+    paddingTop: S[5],
   },
-  headline: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: colors.text,
-    letterSpacing: -0.5,
-    marginBottom: 12,
-    lineHeight: 40,
+  heading: {
+    fontSize: T.size['3xl'],       // 28px
+    fontWeight: T.weight.bold,
+    color: C.textPrimary,
+    marginBottom: S[4],
   },
-  subtext: {
-    fontSize: 15,
-    color: colors.subtext,
-    lineHeight: 22,
-    marginBottom: 28,
-    fontWeight: '400',
-  },
+
+  // ── Phone panel ───────────────────────────────────────────────────────────
   phoneRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 12,
     alignItems: 'center',
+    backgroundColor: C.bgInput,
+    borderRadius: R.input,
+    borderWidth: 1,
+    borderColor: C.border,
+    marginBottom: S[3],
+    paddingHorizontal: S[3],
+    height: DIM.inputHeight,
   },
-  countrySelector: {
+  countrySel: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    minWidth: 90,
+    gap: 4,
+    paddingRight: S[3],
+    borderRightWidth: 1,
+    borderRightColor: C.border,
+    marginRight: S[2],
   },
-  countryFlag: {
-    fontSize: 18,
-  },
+  countryFlag: { fontSize: 18 },
   countryCode: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  phoneInputContainer: {
-    flex: 1,
+    fontSize: T.size.md,
+    fontWeight: T.weight.medium,
+    color: C.textPrimary,
   },
   phoneInput: {
-    fontSize: 18,
-    letterSpacing: 1,
-    fontWeight: '600',
-  },
-  countryDropdown: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 12,
-    overflow: 'hidden',
-  },
-  countryOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  countryOptionActive: {
-    backgroundColor: 'rgba(124,58,237,0.1)',
-  },
-  countryOptionFlag: {
-    fontSize: 20,
-  },
-  countryOptionName: {
     flex: 1,
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '500',
+    fontSize: T.size.md,
+    color: C.textPrimary,
   },
-  countryOptionCode: {
-    color: colors.subtext,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(239,68,68,0.1)',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.25)',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 16,
-  },
+  phoneClose: { padding: 4 },
   errorText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: T.size.sm,
+    color: C.danger,
+    marginBottom: S[2],
+    marginLeft: 2,
+  },
+  pickerList: {
+    backgroundColor: C.bgCard,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: C.border,
+    marginBottom: S[2],
+    ...SH.md,
+  },
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: S[4],
+    paddingVertical: S[3],
+    gap: S[3],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.borderLight,
+  },
+  pickerFlag: { fontSize: 20 },
+  pickerName: {
     flex: 1,
+    fontSize: T.size.md,
+    color: C.textPrimary,
+    fontWeight: T.weight.medium,
   },
-  sendBtn: {
-    marginTop: 8,
-    borderRadius: 16,
+  pickerCode: {
+    fontSize: T.size.base,
+    color: C.textSecondary,
   },
-  phonePill: {
-    marginTop: 14,
+
+  // ── Buttons ───────────────────────────────────────────────────────────────
+  btnOutline: {
+    height: DIM.buttonHeight,
+    borderRadius: R.button,
+    borderWidth: 1.2,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: S[3],
+    backgroundColor: C.bgPrimary,
+  },
+  btnOutlineText: {
+    fontSize: T.size.md,
+    fontWeight: T.weight.semibold,
+    color: C.textPrimary,
+  },
+
+  btnGold: {
+    height: DIM.buttonHeight,
+    borderRadius: R.button,
+    overflow: 'hidden',
+    marginBottom: S[5],
+    ...SH.gold,
+  },
+  btnGoldInner: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnGoldText: {
+    fontSize: T.size.md,
+    fontWeight: T.weight.semibold,
+    color: '#FFFFFF',
+  },
+
+  // ── Divider ───────────────────────────────────────────────────────────────
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: S[3],
+    marginBottom: S[5],
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: C.border,
+  },
+  dividerText: {
+    fontSize: T.size.base,
+    color: C.textMuted,
+    fontWeight: T.weight.regular,
+  },
+
+  // ── Social ────────────────────────────────────────────────────────────────
+  socialRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: S[4],
+    marginBottom: S[6],
+  },
+
+  // ── Footer ────────────────────────────────────────────────────────────────
+  footer: {
+    fontSize: T.size.xs,           // 11px
+    color: C.textMuted,
     textAlign: 'center',
-    color: colors.subtext,
-    fontSize: 13,
-    fontWeight: '500',
+    lineHeight: 16,
   },
-  termsContainer: {
-    paddingHorizontal: 24,
-    paddingBottom: 12,
-    paddingTop: 16,
+  footerLink: {
+    color: C.textSecondary,
+    fontWeight: T.weight.medium,
   },
-  termsText: {
-    textAlign: 'center',
-    color: colors.subtext,
-    fontSize: 12,
-    lineHeight: 18,
+});
+
+const ss = StyleSheet.create({
+  socialBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SH.sm,
   },
-  termsLink: {
-    color: colors.accent,
-    fontWeight: '600',
+  socialBtnDark: {
+    backgroundColor: '#000000',
+  },
+  socialBtnLight: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  googleG: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#4285F4',
+    letterSpacing: -0.5,
   },
 });

@@ -199,22 +199,36 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     // Fetch profile for response
     const profile = await app.prisma.profile.findUnique({ where: { userId: user.id } });
 
+    const modeMap: Record<string, string> = {
+      dating: "dating", hook: "hook",
+      co_travel: "co-travel", night_out: "night-out",
+      club_mates: "club-mates", happening: "happening",
+    };
+
     return reply.send({
       ok: true,
       accessToken,
       refreshToken,
-      expiresIn: 900, // 15 minutes in seconds
+      expiresIn: 900,
       userId: user.id,
       isNewUser,
       user: {
         id: user.id,
         phone: user.phone,
-        name: profile?.name ?? null,
-        age: profile?.age ?? null,
+        name: profile?.name ?? "",
+        age: profile?.age ?? 0,
+        gender: profile?.gender ?? "prefer-not-to-say",
+        bio: profile?.bio ?? undefined,
         photos: profile?.photos ?? [],
-        verified: profile?.verified ?? false,
-        mode: profile?.mode ?? "happening",
+        interests: profile?.interests ?? [],
+        isVerified: profile?.verified ?? false,
+        isPremium: false,
+        activeMode: modeMap[profile?.mode ?? "happening"] ?? "happening",
         isOnline: true,
+        lastSeen: new Date().toISOString(),
+        safetyMode: profile?.safetyMode ?? false,
+        privacyLevel: "public",
+        createdAt: user.createdAt.toISOString(),
       },
     });
   });

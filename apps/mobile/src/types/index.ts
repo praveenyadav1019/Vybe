@@ -1,4 +1,4 @@
-export type Mode = 'dating' | 'hook' | 'co-travel' | 'night-out' | 'club-mates' | 'casual';
+export type Mode = 'dating' | 'hook' | 'co-travel' | 'night-out' | 'club-mates' | 'casual' | 'happening';
 export type Gender = 'male' | 'female' | 'non-binary' | 'prefer-not-to-say';
 export type Distance = 'Same venue' | 'Within 100m' | 'Nearby';
 export type Privacy = 'public' | 'verified-only' | 'private';

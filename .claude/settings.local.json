@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cmd /c \"dir f:\\\\VYBE\\\\node_modules /b 2>&1 | head -20\" 2>&1)"
+    ]
+  }
+}

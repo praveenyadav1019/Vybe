@@ -81,6 +81,12 @@ const MODE_CONFIG: Record<
     color: colors.modes.casual,
     description: 'Low pressure, just vibing.',
   },
+  happening: {
+    emoji: '⚡',
+    label: 'Happening',
+    color: colors.modes.happening,
+    description: 'See what\'s hot right now.',
+  },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -1,22 +1,25 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Tabs } from 'expo-router';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { colors } from '../../src/theme/colors';
 import { useChatStore } from '../../src/stores/chatStore';
 import { useSocket } from '../../src/hooks/useSocket';
 import { useLocationStore } from '../../src/stores/locationStore';
+import { socketClient } from '../../src/lib/socket';
 
 // ─── Tab configuration ──────────────────────────────────────────────────────
 
 const TABS = [
-  { name: 'home',    icon: 'home',        label: 'Home'   },
-  { name: 'radar',   icon: 'radio',       label: 'Radar'  },
-  { name: 'chat',    icon: 'chatbubbles', label: 'Chat'   },
-  { name: 'places',  icon: 'flame',       label: 'Places' },
-  { name: 'profile', icon: 'person',      label: 'Profile'},
+  { name: 'home',    icon: 'home',           label: 'Home'   },
+  { name: 'radar',   icon: 'radio',          label: 'Radar'  },
+  { name: 'meet',    icon: 'shuffle',        label: 'Meet'   },
+  { name: 'chat',    icon: 'chatbubbles',    label: 'Chat'   },
+  { name: 'profile', icon: 'person',         label: 'Profile'},
 ] as const;
 
 // ─── Custom Tab Bar ──────────────────────────────────────────────────────────
@@ -36,7 +39,8 @@ function CustomTabBar({ state, navigation }: {
       <View style={styles.tabBar}>
         {state.routes.map((route, index) => {
           const isFocused = state.index === index;
-          const tab = TABS[index];
+          const tab = TABS.find((t) => t.name === route.name);
+          if (!tab) return null;
           const unreadCount = route.name === 'chat' ? totalUnread : 0;
 
           const onPress = () => {
@@ -97,11 +101,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(10,10,10,0.88)',
+    backgroundColor: 'rgba(255,255,255,0.96)',
   },
   topBorder: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#F1F1F5',
   },
   tabBar: {
     flexDirection: 'row',
@@ -141,34 +145,124 @@ const styles = StyleSheet.create({
   },
 });
 
+// ─── Global Ping Toast ───────────────────────────────────────────────────────
+
+type PingInfo = { fromName: string; fromPhoto: string; message: string };
+
+function GlobalPingToast({ info, onDismiss }: { info: PingInfo; onDismiss: () => void }) {
+  const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 4000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <Animated.View
+      entering={FadeIn}
+      exiting={FadeOut}
+      style={[globalToastStyles.wrap, { top: insets.top + 8 }]}
+    >
+      <LinearGradient colors={['#1A0533', '#2A1050']} style={globalToastStyles.grad}>
+        {info.fromPhoto ? (
+          <Image source={{ uri: info.fromPhoto }} style={globalToastStyles.photo} />
+        ) : (
+          <View style={globalToastStyles.photoFallback}>
+            <Ionicons name="person" size={18} color={colors.primary} />
+          </View>
+        )}
+        <View style={{ flex: 1 }}>
+          <Text style={globalToastStyles.name}>{info.fromName} pinged you 💜</Text>
+          <Text style={globalToastStyles.msg} numberOfLines={1}>{info.message || 'Wants to connect!'}</Text>
+        </View>
+        <TouchableOpacity onPress={onDismiss} style={globalToastStyles.close}>
+          <Ionicons name="close" size={15} color="rgba(255,255,255,0.5)" />
+        </TouchableOpacity>
+      </LinearGradient>
+    </Animated.View>
+  );
+}
+
+const globalToastStyles = StyleSheet.create({
+  wrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 9999,
+    shadowColor: '#7C3AED',
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 12,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  grad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.35)',
+    borderRadius: 18,
+  },
+  photo: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: '#7C3AED' },
+  photoFallback: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: 'rgba(124,58,237,0.2)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  name: { fontSize: 14, fontWeight: '700', color: '#FFF' },
+  msg: { fontSize: 12, color: '#A1A1AA', marginTop: 1 },
+  close: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+});
+
 // ─── Layout ──────────────────────────────────────────────────────────────────
 
 export default function TabsLayout() {
-  // Initialise socket connection + location tracking for all tab screens
   useSocket();
   const startTracking = useLocationStore((s) => s.startTracking);
+  const [pingInfo, setPingInfo] = useState<PingInfo | null>(null);
 
   useEffect(() => {
     void startTracking();
   }, [startTracking]);
 
+  useEffect(() => {
+    const handlePing = (...args: unknown[]) => {
+      setPingInfo(args[0] as PingInfo);
+    };
+    socketClient.on('ping:received', handlePing);
+    return () => socketClient.off('ping:received', handlePing);
+  }, []);
+
+  const dismissPing = useCallback(() => setPingInfo(null), []);
+
   return (
-    <Tabs
-      tabBar={(props) => (
-        <CustomTabBar
-          state={props.state}
-          navigation={props.navigation as Parameters<typeof CustomTabBar>[0]['navigation']}
-        />
+    <View style={{ flex: 1 }}>
+      <Tabs
+        tabBar={(props) => (
+          <CustomTabBar
+            state={props.state}
+            navigation={props.navigation as Parameters<typeof CustomTabBar>[0]['navigation']}
+          />
+        )}
+        screenOptions={{ headerShown: false }}
+      >
+        <Tabs.Screen name="home"    options={{ title: 'Home'    }} />
+        <Tabs.Screen name="radar"   options={{ title: 'Radar'   }} />
+        <Tabs.Screen name="meet"    options={{ title: 'Meet'    }} />
+        <Tabs.Screen name="chat"    options={{ title: 'Chat'    }} />
+        <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
+        <Tabs.Screen name="places"  options={{ href: null }}      />
+      </Tabs>
+      {pingInfo && (
+        <GlobalPingToast info={pingInfo} onDismiss={dismissPing} />
       )}
-      screenOptions={{
-        headerShown: false,
-      }}
-    >
-      <Tabs.Screen name="home"    options={{ title: 'Home'    }} />
-      <Tabs.Screen name="radar"   options={{ title: 'Radar'   }} />
-      <Tabs.Screen name="chat"    options={{ title: 'Chat'    }} />
-      <Tabs.Screen name="places"  options={{ title: 'Places'  }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
-    </Tabs>
+    </View>
   );
 }

@@ -1,4 +1,4 @@
-import type { WebRTCProvider } from "@vybeon/types";
+import type { WebRTCProvider } from "../types";
 
 /** Placeholder until Agora/Twilio adapter ships. */
 export class NoopWebRTCProvider implements WebRTCProvider {

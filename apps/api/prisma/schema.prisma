@@ -9,6 +9,11 @@ datasource db {
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
+enum UserRole {
+  user
+  admin
+}
+
 enum MatchRequestStatus {
   pending
   accepted
@@ -50,6 +55,33 @@ enum SubscriptionPlan {
   vybeon_gold
 }
 
+enum PartyStatus {
+  active
+  cancelled
+  ended
+  full
+}
+
+enum PartyVisibility {
+  public
+  invite_only
+  verified_only
+}
+
+enum JoinRequestStatus {
+  pending
+  accepted
+  rejected
+  waitlisted
+}
+
+enum ConnectionType {
+  matched        // mutual match request accepted
+  met_at_venue   // both checked into same venue
+  met_at_party   // both attended same party
+  stranger_chat  // connected via stranger chat
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -58,18 +90,20 @@ model User {
   pushToken String?
   isOnline  Boolean  @default(false)
   lastSeen  DateTime @default(now())
+  role      UserRole @default(user)
+  isBanned  Boolean  @default(false)
   createdAt DateTime @default(now())
 
   profile       Profile?
   verification  Verification?
   location      UserLocation?
-  otpCodes      OtpCode[]
   sessions      DeviceSession[]
+  preference    UserPreference?
 
   sentRequests     MatchRequest[] @relation("SentRequests")
   receivedRequests MatchRequest[] @relation("ReceivedRequests")
 
-  chats    Chat[]       @relation("ChatUsers")
+  chats    Chat[]        @relation("ChatUsers")
   messages Message[]
   calls    CallSession[] @relation("CallUsers")
 
@@ -81,6 +115,24 @@ model User {
   subscription  Subscription?
   notifications Notification[]
   checkins      PlaceCheckin[]
+
+  clubMateSent     ClubMateRequest[] @relation("ClubMateSent")
+  clubMateReceived ClubMateRequest[] @relation("ClubMateReceived")
+  presence         UserPresence?
+  locationHistory  LocationHistory[]
+
+  strangerSessionsA StrangerSession[] @relation("StrangerUserA")
+  strangerSessionsB StrangerSession[] @relation("StrangerUserB")
+  strangerQueue     StrangerQueue?
+
+  // Party system
+  hostedParties    HouseParty[]        @relation("PartyHost")
+  partyRequests    PartyJoinRequest[]  @relation("PartyRequester")
+  partyAttendances PartyAttendee[]
+
+  // Connections
+  connectionsA Connection[] @relation("ConnectionUserA")
+  connectionsB Connection[] @relation("ConnectionUserB")
 }
 
 model Profile {
@@ -95,8 +147,12 @@ model Profile {
   interests String[] @default([])
   photos    String[] @default([])
   verified  Boolean  @default(false)
-  mode      AppMode  @default(casual)
+  mode      AppMode  @default(happening)
   safetyMode Boolean @default(false)
+
+  // Nightlife vibe tags
+  vibeTags      String[] @default([]) // e.g. "EDM lover", "Club regular", "Party host"
+  nightlifePrefs String[] @default([]) // e.g. "Rooftops", "House parties", "Live music"
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -177,14 +233,14 @@ model Chat {
 }
 
 model Message {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   chatId    String
   senderId  String
   content   String
-  type      String   @default("text")
+  type      String    @default("text")
   mediaUrl  String?
   readAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   chat   Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sender User @relation(fields: [senderId], references: [id], onDelete: Cascade)
@@ -219,6 +275,10 @@ model Place {
   tags        String[] @default([])
   photos      String[] @default([])
   isHappening Boolean  @default(false)
+  googlePlaceId String? @unique  // Google Places API ID for deduplication
+  rating      Float?
+  priceLevel  Int?     // 0-4 (Google's price level)
+  openNow     Boolean?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -226,15 +286,18 @@ model Place {
   checkins  PlaceCheckin[]
 
   @@index([isHappening])
+  @@index([googlePlaceId])
 }
 
 model PlaceActivity {
-  placeId     String @id
-  place       Place  @relation(fields: [placeId], references: [id], onDelete: Cascade)
-  activeUsers Int    @default(0)
-  vibeScore   Float  @default(0)
-  crowdScore  Float  @default(0)
-  updatedAt   DateTime @updatedAt
+  placeId      String   @id
+  place        Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  activeUsers  Int      @default(0)
+  vibeScore    Float    @default(0)
+  crowdScore   Float    @default(0)
+  musicType    String?  // EDM, Hip-Hop, Bollywood, etc.
+  genderRatio  Float?   // 0.0 = all male, 1.0 = all female, 0.5 = balanced
+  updatedAt    DateTime @updatedAt
 }
 
 model PlaceCheckin {
@@ -302,5 +365,261 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, read])
+  @@index([userId, createdAt])
+}
+
+// ─── House Party System ───────────────────────────────────────────────────────
+
+model HouseParty {
+  id              String          @id @default(cuid())
+  hostId          String
+  host            User            @relation("PartyHost", fields: [hostId], references: [id], onDelete: Cascade)
+
+  title           String
+  description     String?
+  coverImage      String?
+
+  // Location (no exact address shown until accepted)
+  neighborhood    String?   // e.g. "Koramangala, Bengaluru"
+  city            String
+  state           String?
+  lat             Float?
+  lng             Float?
+
+  // Vibe
+  vibeType        String    // House Party | Rooftop | Pool Party | Chill | Rave | etc.
+  musicType       String?   // EDM | Hip-Hop | Bollywood | Mixed | etc.
+
+  // Rules
+  ageMin          Int       @default(18)
+  ageMax          Int?
+  allowMale       Boolean   @default(true)
+  allowFemale     Boolean   @default(true)
+  allowCouple     Boolean   @default(true)
+  maxAttendees    Int       @default(30)
+  isByob          Boolean   @default(false)  // Bring Your Own Bottle
+  isPaid          Boolean   @default(false)
+  entryFee        Float?
+  requiresVerification Boolean @default(false)
+
+  // Time
+  startsAt        DateTime
+  endsAt          DateTime?
+
+  status          PartyStatus     @default(active)
+  visibility      PartyVisibility @default(public)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  joinRequests    PartyJoinRequest[]
+  attendees       PartyAttendee[]
+
+  @@index([hostId])
+  @@index([city, status])
+  @@index([startsAt, status])
+  @@index([lat, lng])
+}
+
+model PartyJoinRequest {
+  id        String            @id @default(cuid())
+  partyId   String
+  userId    String
+  party     HouseParty        @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  user      User              @relation("PartyRequester", fields: [userId], references: [id], onDelete: Cascade)
+  status    JoinRequestStatus @default(pending)
+  message   String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([partyId, userId])
+  @@index([partyId, status])
+  @@index([userId])
+}
+
+model PartyAttendee {
+  id        String     @id @default(cuid())
+  partyId   String
+  userId    String
+  party     HouseParty @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime   @default(now())
+
+  @@unique([partyId, userId])
+  @@index([partyId])
+  @@index([userId])
+}
+
+// ─── Connections ──────────────────────────────────────────────────────────────
+
+model Connection {
+  id         String         @id @default(cuid())
+  userAId    String
+  userBId    String
+  userA      User           @relation("ConnectionUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB      User           @relation("ConnectionUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  type       ConnectionType @default(matched)
+  metAt      String?        // venue name or party title where they met
+  createdAt  DateTime       @default(now())
+
+  @@unique([userAId, userBId])
+  @@index([userAId])
+  @@index([userBId])
+  @@index([type])
+}
+
+// ─── Clubmate System ──────────────────────────────────────────────────────────
+
+enum ClubMateStatus {
+  pending
+  accepted
+  rejected
+  expired
+}
+
+enum ClubMateType {
+  female
+  male
+  couple
+  group
+  any
+}
+
+model ClubMateRequest {
+  id          String         @id @default(cuid())
+  fromUserId  String
+  toUserId    String?
+  placeId     String?
+  status      ClubMateStatus @default(pending)
+  type        ClubMateType   @default(any)
+  goingAt     DateTime?
+  message     String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  fromUser User  @relation("ClubMateSent", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   User? @relation("ClubMateReceived", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@index([placeId, status])
+}
+
+// ─── User Presence ────────────────────────────────────────────────────────────
+
+model UserPresence {
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venueId         String?
+  venueName       String?
+  city            String?
+  state           String?
+  country         String?
+  pincode         String?
+  isLive          Boolean  @default(false)
+  currentActivity String?
+  updatedAt       DateTime @updatedAt
+}
+
+// ─── Stranger Chat System ─────────────────────────────────────────────────────
+
+model StrangerQueue {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mode       String   @default("text")      // text | video | audio
+  genderPref String   @default("everyone")  // everyone | male | female
+  interests  String[] @default([])
+  nearbyOnly Boolean  @default(false)
+  lat        Float?
+  lng        Float?
+  city       String?
+  country    String   @default("IN")
+  joinedAt   DateTime @default(now())
+  expiresAt  DateTime
+
+  @@index([mode, genderPref, country])
+  @@index([expiresAt])
+}
+
+model StrangerSession {
+  id        String   @id @default(cuid())
+  userAId   String
+  userBId   String
+  userA     User     @relation("StrangerUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User     @relation("StrangerUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  mode      String   @default("text")    // text | video | audio
+  status    String   @default("active")  // active | ended | converted | reported
+  roomId    String   @unique @default(cuid())
+  endedAt   DateTime?
+  endedBy   String?  // userId who ended / "system"
+  skipCount Int      @default(0)
+  duration  Int?     // seconds
+  createdAt DateTime @default(now())
+
+  messages StrangerMessage[]
+  flags    VideoModerationFlag[]
+
+  @@index([userAId, status])
+  @@index([userBId, status])
+  @@index([status, createdAt])
+}
+
+model StrangerMessage {
+  id        String          @id @default(cuid())
+  sessionId String
+  session   StrangerSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  senderId  String
+  content   String
+  type      String          @default("text") // text | image | emoji
+  createdAt DateTime        @default(now())
+
+  @@index([sessionId, createdAt])
+}
+
+model UserPreference {
+  userId         String  @id
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strangerMode   String  @default("text")      // text | video | audio
+  genderPref     String  @default("everyone")
+  nearbyOnly     Boolean @default(false)
+  country        String  @default("IN")
+  allowStrangers Boolean @default(true)
+  showDistance   Boolean @default(true)
+  maxRadiusM     Int     @default(5000)
+  privacyLevel   String  @default("public")    // public | verified-only | private
+  updatedAt      DateTime @updatedAt
+}
+
+model VideoModerationFlag {
+  id         String          @id @default(cuid())
+  sessionId  String
+  session    StrangerSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  reporterId String
+  reason     String          // nudity | harassment | underage | spam | other
+  details    String?
+  severity   String          @default("low")   // low | medium | high | critical
+  resolved   Boolean         @default(false)
+  createdAt  DateTime        @default(now())
+
+  @@index([sessionId])
+  @@index([reporterId])
+  @@index([resolved, severity])
+}
+
+// ─── Location History ─────────────────────────────────────────────────────────
+
+model LocationHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lat       Float
+  lng       Float
+  city      String?
+  state     String?
+  country   String?
+  pincode   String?
+  createdAt DateTime @default(now())
+
   @@index([userId, createdAt])
 }

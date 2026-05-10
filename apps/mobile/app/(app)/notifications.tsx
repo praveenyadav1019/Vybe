@@ -1,179 +1,240 @@
 import React, { useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
+  View, Text, TouchableOpacity, StyleSheet,
+  FlatList, StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
-import { formatDistanceToNow } from 'date-fns';
-import { api } from '@/lib/api';
-import { colors } from '@/theme/colors';
-import { Avatar } from '@/components/ui/Avatar';
-import type { Notification } from '@/types';
+import { useRouter } from 'expo-router';
 
-const NOTIF_ICONS: Record<string, { icon: string; color: string; emoji: string }> = {
-  match_request: { icon: 'radio-button-on', color: colors.primary, emoji: '💕' },
-  match_accepted: { icon: 'heart', color: '#FF4D6D', emoji: '🎉' },
-  message: { icon: 'chatbubble', color: colors.accent, emoji: '💬' },
-  call: { icon: 'call', color: colors.success, emoji: '📞' },
-  nearby: { icon: 'location', color: colors.warning, emoji: '📍' },
-  safety: { icon: 'shield', color: colors.danger, emoji: '🛡️' },
-};
-
-// Sample notifications for demo
-const DEMO_NOTIFICATIONS: Notification[] = [
-  { id: '1', type: 'match_request', title: 'Priya sent you a Ping', body: 'Priya, 24 wants to connect with you in Dating mode', read: false, createdAt: new Date(Date.now() - 5 * 60000).toISOString() },
-  { id: '2', type: 'match_accepted', title: 'Rahul accepted your Ping!', body: 'You matched with Rahul. Start a conversation!', read: false, createdAt: new Date(Date.now() - 30 * 60000).toISOString() },
-  { id: '3', type: 'message', title: 'New message from Ananya', body: 'Hey! What are you up to tonight? 🌙', read: false, createdAt: new Date(Date.now() - 2 * 3600000).toISOString() },
-  { id: '4', type: 'nearby', title: '5 people in Night Out mode nearby', body: 'Open Radar to discover who\'s around you', read: true, createdAt: new Date(Date.now() - 5 * 3600000).toISOString() },
-  { id: '5', type: 'match_request', title: 'Kavya sent you a Ping', body: 'Kavya, 22 is in Club Mates mode nearby', read: true, createdAt: new Date(Date.now() - 24 * 3600000).toISOString() },
+// ─── Mock data ────────────────────────────────────────────────────────────────
+const TODAY_NOTIFS = [
+  {
+    id: '1',
+    type: 'like',
+    icon: 'heart' as const,
+    iconColor: '#EF4444',
+    iconBg: '#FEE2E2',
+    photo: 'https://randomuser.me/api/portraits/women/44.jpg',
+    title: "Someone liked your profile.",
+    body: "Check out who's interested in you.",
+    time: '2m ago',
+    read: false,
+  },
+  {
+    id: '2',
+    type: 'event',
+    icon: 'calendar' as const,
+    iconColor: '#7C3AED',
+    iconBg: '#EDE9FE',
+    photo: null,
+    title: 'New event in your area: Rooftop Mixer.',
+    body: 'Join other members for drinks tonight!',
+    time: '1h ago',
+    read: false,
+  },
 ];
 
-function NotificationItem({ item, onPress }: { item: Notification; onPress: () => void }) {
-  const config = NOTIF_ICONS[item.type] || NOTIF_ICONS.nearby;
+const EARLIER_NOTIFS = [
+  {
+    id: '3',
+    type: 'message',
+    icon: 'chatbubble' as const,
+    iconColor: '#2563EB',
+    iconBg: '#DBEAFE',
+    photo: 'https://randomuser.me/api/portraits/men/32.jpg',
+    title: 'Message from Rohan.',
+    body: 'Hey, are you free for coffee this weekend?',
+    time: 'Yesterday',
+    read: true,
+  },
+  {
+    id: '4',
+    type: 'match',
+    icon: 'airplane' as const,
+    iconColor: '#059669',
+    iconBg: '#D1FAE5',
+    photo: null,
+    title: 'Travel Buddy Match: Paris.',
+    body: 'Based on your upcoming trip.',
+    time: '2 days ago',
+    read: true,
+  },
+];
 
+type NotifItem = {
+  id: string;
+  type: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  iconColor: string;
+  iconBg: string;
+  photo: string | null;
+  title: string;
+  body: string;
+  time: string;
+  read: boolean;
+};
+
+// ─── Color tokens ─────────────────────────────────────────────────────────────
+const ink    = '#1A1A2E';
+const inkSec = '#6B7280';
+const white  = '#FFFFFF';
+const brand  = '#7C3AED';
+const bgSec  = '#F9FAFB';
+const border = '#F3F4F6';
+
+// ─── Notification row ─────────────────────────────────────────────────────────
+function NotifRow({ item, onPress }: { item: NotifItem; onPress: () => void }) {
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.8} style={[styles.notifItem, !item.read && styles.notifUnread]}>
-      {!item.read && <View style={styles.unreadDot} />}
-      <View style={[styles.notifIcon, { backgroundColor: `${config.color}22` }]}>
-        <Text style={styles.notifEmoji}>{config.emoji}</Text>
-      </View>
+    <TouchableOpacity
+      style={[styles.notifRow, !item.read && styles.notifRowUnread]}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      {/* Icon / avatar */}
+      {item.photo ? (
+        <View style={styles.avatarWrap}>
+          <Image source={{ uri: item.photo }} style={styles.avatar} contentFit="cover" />
+          <View style={[styles.iconBadge, { backgroundColor: item.iconBg }]}>
+            <Ionicons name={item.icon} size={10} color={item.iconColor} />
+          </View>
+        </View>
+      ) : (
+        <View style={[styles.iconCircle, { backgroundColor: item.iconBg }]}>
+          <Ionicons name={item.icon} size={22} color={item.iconColor} />
+        </View>
+      )}
+
+      {/* Text */}
       <View style={styles.notifContent}>
-        <Text style={styles.notifTitle} numberOfLines={1}>{item.title}</Text>
-        <Text style={styles.notifBody} numberOfLines={2}>{item.body}</Text>
-        <Text style={styles.notifTime}>
-          {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
+        <Text style={[styles.notifTitle, !item.read && styles.notifTitleUnread]}>
+          {item.title}
         </Text>
+        <Text style={styles.notifBody} numberOfLines={1}>{item.body}</Text>
+        <Text style={styles.notifTime}>{item.time}</Text>
       </View>
+
+      {/* Unread dot */}
+      {!item.read && <View style={styles.unreadDot} />}
     </TouchableOpacity>
   );
 }
 
-export default function NotificationsScreen() {
+// ─── Main screen ──────────────────────────────────────────────────────────────
+export default function NotificationCenterScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
-  const queryClient = useQueryClient();
-  const [notifications, setNotifications] = useState<Notification[]>(DEMO_NOTIFICATIONS);
+  const [todayRead, setTodayRead] = useState(false);
 
-  // In production, fetch from API:
-  // const { data } = useQuery({ queryKey: ['notifications'], queryFn: () => api.get('/notifications') });
+  const todayItems = todayRead
+    ? TODAY_NOTIFS.map((n) => ({ ...n, read: true }))
+    : TODAY_NOTIFS;
 
-  const markAllRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    // api.patch('/notifications/read-all');
-  };
-
-  const handleNotifPress = (notif: Notification) => {
-    setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
-    switch (notif.type) {
-      case 'match_request':
-        router.push('/(app)/nearby');
-        break;
-      case 'match_accepted':
-        router.push('/(app)/chats/');
-        break;
-      case 'message':
-        router.push('/(app)/chats/');
-        break;
-      case 'nearby':
-        router.push('/(app)/radar');
-        break;
-      default:
-        break;
-    }
-  };
-
-  const unreadCount = notifications.filter(n => !n.read).length;
-
-  const today = notifications.filter(n => {
-    const diff = Date.now() - new Date(n.createdAt).getTime();
-    return diff < 24 * 3600000;
-  });
-  const earlier = notifications.filter(n => {
-    const diff = Date.now() - new Date(n.createdAt).getTime();
-    return diff >= 24 * 3600000;
-  });
+  const sections = [
+    { key: 'today', label: 'TODAY', items: todayItems },
+    { key: 'earlier', label: 'EARLIER', items: EARLIER_NOTIFS },
+  ];
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <Animated.View entering={FadeInDown.delay(50)} style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          Notifications {unreadCount > 0 ? `(${unreadCount})` : ''}
-        </Text>
-        {unreadCount > 0 ? (
-          <TouchableOpacity onPress={markAllRead}>
-            <Text style={styles.markAllBtn}>Mark all read</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={{ width: 60 }} />
-        )}
-      </Animated.View>
+    <View style={[styles.root, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="dark-content" backgroundColor={white} />
 
-      {notifications.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyEmoji}>🔔</Text>
-          <Text style={styles.emptyTitle}>No notifications yet</Text>
-          <Text style={styles.emptySubtext}>When you get pings, matches, and messages they'll appear here</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={[]}
-          ListHeaderComponent={() => (
-            <>
-              {today.length > 0 && (
-                <>
-                  <Text style={styles.groupLabel}>Today</Text>
-                  {today.map((item, i) => (
-                    <Animated.View key={item.id} entering={FadeInRight.delay(i * 60)}>
-                      <NotificationItem item={item} onPress={() => handleNotifPress(item)} />
-                    </Animated.View>
-                  ))}
-                </>
+      <FlatList
+        data={sections}
+        keyExtractor={(s) => s.key}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+        ListHeaderComponent={
+          <Animated.View entering={FadeInDown.delay(0).duration(350)} style={styles.titleRow}>
+            <Text style={styles.title}>Notification Center</Text>
+          </Animated.View>
+        }
+        renderItem={({ item: section, index: sIdx }) => (
+          <Animated.View entering={FadeInDown.delay(sIdx * 80 + 60).duration(380)}>
+            {/* Section header */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>{section.label}</Text>
+              {section.key === 'today' && (
+                <TouchableOpacity onPress={() => setTodayRead(true)} activeOpacity={0.7}>
+                  <Text style={styles.markAllRead}>Mark All as Read</Text>
+                </TouchableOpacity>
               )}
-              {earlier.length > 0 && (
-                <>
-                  <Text style={styles.groupLabel}>Earlier</Text>
-                  {earlier.map((item, i) => (
-                    <Animated.View key={item.id} entering={FadeInRight.delay(i * 60)}>
-                      <NotificationItem item={item} onPress={() => handleNotifPress(item)} />
-                    </Animated.View>
-                  ))}
-                </>
-              )}
-            </>
-          )}
-          renderItem={() => null}
-          keyExtractor={(_, i) => i.toString()}
-          contentContainerStyle={{ paddingBottom: 40 }}
-        />
-      )}
-    </SafeAreaView>
+            </View>
+
+            {/* Notification rows */}
+            {section.items.map((notif, i) => (
+              <React.Fragment key={notif.id}>
+                <Animated.View entering={FadeInRight.delay(sIdx * 80 + i * 40 + 80).duration(320)}>
+                  <NotifRow
+                    item={notif}
+                    onPress={() => {}}
+                  />
+                </Animated.View>
+                {i < section.items.length - 1 && <View style={styles.rowDivider} />}
+              </React.Fragment>
+            ))}
+          </Animated.View>
+        )}
+        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+      />
+    </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const AVATAR_SIZE = 50;
+const ICON_CIRCLE = 50;
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { color: colors.text, fontSize: 18, fontWeight: '700', flex: 1, textAlign: 'center' },
-  markAllBtn: { color: colors.primary, fontSize: 13, fontWeight: '600' },
-  groupLabel: { color: colors.subtext, fontSize: 12, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase', paddingHorizontal: 16, paddingVertical: 8 },
-  notifItem: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 16, paddingVertical: 14, gap: 12, borderBottomWidth: 1, borderBottomColor: colors.border, position: 'relative' },
-  notifUnread: { backgroundColor: `${colors.primary}08` },
-  unreadDot: { position: 'absolute', left: 6, top: '50%', width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
-  notifIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  notifEmoji: { fontSize: 20 },
-  notifContent: { flex: 1, gap: 2 },
-  notifTitle: { color: colors.text, fontSize: 14, fontWeight: '600' },
-  notifBody: { color: colors.subtext, fontSize: 13, lineHeight: 19 },
-  notifTime: { color: colors.subtext, fontSize: 11, marginTop: 2 },
-  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40 },
-  emptyEmoji: { fontSize: 56 },
-  emptyTitle: { color: colors.text, fontSize: 20, fontWeight: '700' },
-  emptySubtext: { color: colors.subtext, fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  root: { flex: 1, backgroundColor: white },
+
+  titleRow: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
+  title: { fontSize: 28, fontWeight: '800', color: ink },
+
+  sectionHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 8,
+  },
+  sectionLabel: { fontSize: 12, fontWeight: '700', color: inkSec, letterSpacing: 0.8 },
+  markAllRead: { fontSize: 13, fontWeight: '500', color: brand },
+
+  // ── Notification row ────────────────────────────────────────────────────────
+  notifRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 20, paddingVertical: 12,
+    backgroundColor: white,
+    gap: 12,
+  },
+  notifRowUnread: { backgroundColor: '#F5F3FF' },
+
+  avatarWrap: { position: 'relative' },
+  avatar: {
+    width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2,
+    backgroundColor: bgSec,
+  },
+  iconBadge: {
+    position: 'absolute', bottom: -2, right: -2,
+    width: 20, height: 20, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: white,
+  },
+  iconCircle: {
+    width: ICON_CIRCLE, height: ICON_CIRCLE, borderRadius: ICON_CIRCLE / 2,
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  notifContent: { flex: 1 },
+  notifTitle: { fontSize: 14, fontWeight: '500', color: ink, lineHeight: 19 },
+  notifTitleUnread: { fontWeight: '700' },
+  notifBody: { fontSize: 13, color: inkSec, marginTop: 2, lineHeight: 17 },
+  notifTime: { fontSize: 11, color: inkSec, marginTop: 3 },
+
+  unreadDot: {
+    width: 8, height: 8, borderRadius: 4, backgroundColor: brand,
+  },
+
+  rowDivider: { height: 1, backgroundColor: border, marginLeft: 82 },
 });

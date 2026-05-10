@@ -1,288 +1,182 @@
 import React, { useEffect } from 'react';
-import { View, Text, Dimensions, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, StatusBar } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
   withTiming,
   withDelay,
-  withRepeat,
-  withSequence,
   runOnJS,
+  Easing,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
-import { colors } from '@/theme/colors';
-import Constants from 'expo-constants';
+import { VLogo } from '@/components/ui/VLogo';
+import { C, T, ANIM } from '@/design/tokens';
 
-const { width, height } = Dimensions.get('window');
-
-const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
+const { width } = Dimensions.get('window');
 
 export default function SplashScreen() {
-  const router = useRouter();
-  const token = useAuthStore((s) => s.token);
+  const router   = useRouter();
+  const token    = useAuthStore((s) => s.token);
   const hydrated = useAuthStore((s) => s.hydrated);
 
-  // Logo animation values
-  const logoScale = useSharedValue(0);
+  // ─── Animation values ────────────────────────────────────────────────────
+  const logoScale   = useSharedValue(0.72);
   const logoOpacity = useSharedValue(0);
 
-  // Tagline animation
-  const taglineOpacity = useSharedValue(0);
-  const taglineTranslateY = useSharedValue(20);
+  const wordOpacity    = useSharedValue(0);
+  const wordTranslateY = useSharedValue(12);
 
-  // Orb animations
-  const orb1Scale = useSharedValue(1);
-  const orb2Scale = useSharedValue(1);
-  const orb3Scale = useSharedValue(1);
-  const orb1Opacity = useSharedValue(0.35);
-  const orb2Opacity = useSharedValue(0.25);
-  const orb3Opacity = useSharedValue(0.3);
+  const taglineOpacity    = useSharedValue(0);
+  const taglineTranslateY = useSharedValue(10);
 
-  // Version text
-  const versionOpacity = useSharedValue(0);
+  const barOpacity = useSharedValue(0);
+  const barScaleX  = useSharedValue(0);
 
+  // ─── Navigate ─────────────────────────────────────────────────────────────
   function navigate() {
     if (token) {
       router.replace('/(tabs)/home');
     } else {
-      router.replace('/(auth)/onboarding');
+      router.replace('/(auth)/login');
     }
   }
 
   useEffect(() => {
-    // Logo: spring scale-in
-    logoScale.value = withSpring(1, {
-      damping: 14,
-      stiffness: 120,
-      mass: 1,
-    });
-    logoOpacity.value = withTiming(1, { duration: 400 });
+    // Logo springs in
+    logoScale.value   = withSpring(1, ANIM.spring.logo);
+    logoOpacity.value = withTiming(1, { duration: 350 });
 
-    // Tagline: fade in + slide up after 600ms
-    taglineOpacity.value = withDelay(600, withTiming(1, { duration: 500 }));
-    taglineTranslateY.value = withDelay(600, withTiming(0, { duration: 500 }));
-
-    // Version text
-    versionOpacity.value = withDelay(900, withTiming(0.5, { duration: 400 }));
-
-    // Orb pulsing animations - staggered starts
-    orb1Scale.value = withRepeat(
-      withSequence(
-        withTiming(1.25, { duration: 2200 }),
-        withTiming(1, { duration: 2200 })
-      ),
-      -1,
-      false
-    );
-    orb1Opacity.value = withRepeat(
-      withSequence(
-        withTiming(0.55, { duration: 2200 }),
-        withTiming(0.2, { duration: 2200 })
-      ),
-      -1,
-      false
+    // "VYBEON" text fades + rises — 300ms after logo
+    wordOpacity.value    = withDelay(300, withTiming(1, { duration: 380 }));
+    wordTranslateY.value = withDelay(300,
+      withTiming(0, { duration: 380, easing: Easing.out(Easing.cubic) })
     );
 
-    orb2Scale.value = withDelay(
-      700,
-      withRepeat(
-        withSequence(
-          withTiming(1.3, { duration: 2600 }),
-          withTiming(0.9, { duration: 2600 })
-        ),
-        -1,
-        false
-      )
-    );
-    orb2Opacity.value = withDelay(
-      700,
-      withRepeat(
-        withSequence(
-          withTiming(0.45, { duration: 2600 }),
-          withTiming(0.15, { duration: 2600 })
-        ),
-        -1,
-        false
-      )
+    // Tagline — 500ms after logo
+    taglineOpacity.value    = withDelay(500, withTiming(1, { duration: 380 }));
+    taglineTranslateY.value = withDelay(500,
+      withTiming(0, { duration: 380, easing: Easing.out(Easing.cubic) })
     );
 
-    orb3Scale.value = withDelay(
-      1400,
-      withRepeat(
-        withSequence(
-          withTiming(1.2, { duration: 3000 }),
-          withTiming(0.85, { duration: 3000 })
-        ),
-        -1,
-        false
-      )
-    );
-    orb3Opacity.value = withDelay(
-      1400,
-      withRepeat(
-        withSequence(
-          withTiming(0.5, { duration: 3000 }),
-          withTiming(0.18, { duration: 3000 })
-        ),
-        -1,
-        false
-      )
+    // Bottom gradient bar — 800ms in
+    barOpacity.value = withDelay(800, withTiming(1, { duration: 300 }));
+    barScaleX.value  = withDelay(800,
+      withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) })
     );
 
-    // Navigate after 2.5s (wait for hydration too)
-    const timer = setTimeout(() => {
-      runOnJS(navigate)();
-    }, 2500);
-
-    return () => clearTimeout(timer);
+    // Navigate at 2 500ms
+    const t = setTimeout(() => runOnJS(navigate)(), 2500);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const logoAnimatedStyle = useAnimatedStyle(() => ({
+  const logoStyle = useAnimatedStyle(() => ({
     transform: [{ scale: logoScale.value }],
-    opacity: logoOpacity.value,
+    opacity:   logoOpacity.value,
   }));
 
-  const taglineAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: taglineOpacity.value,
+  const wordStyle = useAnimatedStyle(() => ({
+    opacity:   wordOpacity.value,
+    transform: [{ translateY: wordTranslateY.value }],
+  }));
+
+  const taglineStyle = useAnimatedStyle(() => ({
+    opacity:   taglineOpacity.value,
     transform: [{ translateY: taglineTranslateY.value }],
   }));
 
-  const orb1Style = useAnimatedStyle(() => ({
-    transform: [{ scale: orb1Scale.value }],
-    opacity: orb1Opacity.value,
-  }));
-
-  const orb2Style = useAnimatedStyle(() => ({
-    transform: [{ scale: orb2Scale.value }],
-    opacity: orb2Opacity.value,
-  }));
-
-  const orb3Style = useAnimatedStyle(() => ({
-    transform: [{ scale: orb3Scale.value }],
-    opacity: orb3Opacity.value,
-  }));
-
-  const versionStyle = useAnimatedStyle(() => ({
-    opacity: versionOpacity.value,
+  const barStyle = useAnimatedStyle(() => ({
+    opacity:   barOpacity.value,
+    transform: [{ scaleX: barScaleX.value }],
   }));
 
   return (
-    <View style={styles.container}>
-      {/* Ambient orbs */}
-      <Animated.View style={[styles.orb, styles.orb1, orb1Style]} />
-      <Animated.View style={[styles.orb, styles.orb2, orb2Style]} />
-      <Animated.View style={[styles.orb, styles.orb3, orb3Style]} />
+    <View style={styles.root}>
+      <StatusBar barStyle="dark-content" backgroundColor={C.bgSplash} />
 
-      {/* Center content */}
-      <View style={styles.centerContent}>
-        {/* Logo */}
-        <Animated.View style={logoAnimatedStyle}>
-          <LinearGradient
-            colors={['#7C3AED', '#00E5FF']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.logoGradient}
-          >
-            <Text style={styles.logoText}>VYBEON</Text>
-          </LinearGradient>
+      {/* ── Center stack ─────────────────────────────────────────────────── */}
+      <View style={styles.center}>
+
+        {/* V logo */}
+        <Animated.View style={[styles.logoWrap, logoStyle]}>
+          <VLogo size={96} />
         </Animated.View>
 
-        {/* Glowing underline accent */}
-        <Animated.View style={[styles.logoUnderline, logoAnimatedStyle]} />
+        {/* VYBEON wordmark */}
+        <Animated.Text style={[styles.wordmark, wordStyle]}>
+          VYBEON
+        </Animated.Text>
 
         {/* Tagline */}
-        <Animated.Text style={[styles.tagline, taglineAnimatedStyle]}>
-          Find your vibe, find your people
+        <Animated.Text style={[styles.tagline, taglineStyle]}>
+          Meet. Connect. Vibe.
         </Animated.Text>
       </View>
 
-      {/* Version */}
-      <Animated.Text style={[styles.version, versionStyle]}>
-        v{APP_VERSION}
-      </Animated.Text>
+      {/* ── Bottom gradient bar ───────────────────────────────────────────── */}
+      <Animated.View style={[styles.barWrap, barStyle]}>
+        <LinearGradient
+          colors={[C.logoFrom, C.logoTo]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.bar}
+        />
+      </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#FAFAFA',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  centerContent: {
+
+  // ── Center block ────────────────────────────────────────────────────────
+  center: {
     alignItems: 'center',
-    zIndex: 10,
+    // Slightly above vertical center (matches reference)
+    marginTop: -32,
   },
-  orb: {
-    position: 'absolute',
-    borderRadius: 9999,
+
+  logoWrap: {
+    marginBottom: 22,
+    // subtle drop shadow behind the SVG to give depth
+    shadowColor: '#9333EA',
+    shadowOpacity: 0.22,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
   },
-  orb1: {
-    width: 340,
-    height: 340,
-    backgroundColor: 'rgba(124, 58, 237, 0.18)',
-    top: height * 0.08,
-    left: -80,
+
+  wordmark: {
+    fontSize: 24,
+    fontWeight: T.weight.black,
+    color: '#1A1A2E',
+    letterSpacing: T.tracking.widest,   // 2px — matches reference
+    marginBottom: 8,
   },
-  orb2: {
-    width: 280,
-    height: 280,
-    backgroundColor: 'rgba(0, 229, 255, 0.12)',
-    bottom: height * 0.12,
-    right: -60,
-  },
-  orb3: {
-    width: 200,
-    height: 200,
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    bottom: height * 0.3,
-    left: width * 0.1,
-  },
-  logoGradient: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  logoText: {
-    fontSize: 58,
-    fontWeight: '900',
-    color: colors.text,
-    letterSpacing: -1,
-    textShadowColor: 'rgba(124, 58, 237, 0.6)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 24,
-  },
-  logoUnderline: {
-    width: 80,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: colors.accent,
-    marginTop: 8,
-    shadowColor: colors.accent,
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 8,
-  },
+
   tagline: {
-    marginTop: 20,
-    fontSize: 16,
-    color: colors.subtext,
-    letterSpacing: 0.5,
-    fontWeight: '400',
-    textAlign: 'center',
+    fontSize: T.size.base,              // 13px
+    fontWeight: T.weight.regular,
+    color: '#9CA3AF',
+    letterSpacing: 0.3,
   },
-  version: {
+
+  // ── Bottom bar ──────────────────────────────────────────────────────────
+  barWrap: {
     position: 'absolute',
-    bottom: 48,
-    fontSize: 12,
-    color: colors.subtext,
-    letterSpacing: 1,
+    bottom: 52,
+    alignItems: 'center',
+  },
+  bar: {
+    width: 88,
+    height: 2.5,
+    borderRadius: 9999,
   },
 });

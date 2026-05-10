@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import * as SecureStore from "expo-secure-store";
-import type { AppMode } from "@vybeon/types";
+import type { AppMode } from "../types";
 
 const ONBOARDING_KEY = "vybeon_onboarding_complete";
 

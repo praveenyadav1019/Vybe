@@ -1,9 +1,10 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { socketClient } from '../lib/socket';
 import { useAuthStore } from '../stores/authStore';
 import { useChatStore } from '../stores/chatStore';
 import { useDiscoveryStore } from '../stores/discoveryStore';
-import type { Message, NearbyUser } from '../types';
+import { attachStrangerSocketListeners } from '../stores/strangerStore';
+import type { Message, NearbyUser, Mode, Distance } from '../types';
 
 export function useSocket() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -38,9 +39,35 @@ export function useSocket() {
           setTyping(chatId, userId, isTyping);
         });
 
+        // Wire stranger chat listeners (idempotent — socketClient.on deduplication is safe)
+        attachStrangerSocketListeners();
+
         socketClient.on('nearby:update', (raw: unknown) => {
-          const { users } = raw as { users: NearbyUser[] };
-          setNearbyUsers(users);
+          const payload = raw as {
+            users: Array<{
+              id: string; name: string; age: number;
+              photoUrl?: string; verified?: boolean;
+              mode?: string; interests?: string[];
+              isOnline?: boolean; distanceBucket?: string;
+            }>;
+          };
+          const modeMap: Record<string, Mode> = {
+            dating: 'dating', hook: 'hook',
+            co_travel: 'co-travel', night_out: 'night-out',
+            club_mates: 'club-mates', happening: 'happening',
+          };
+          const normalized: NearbyUser[] = (payload.users ?? []).map((u) => ({
+            id: u.id,
+            name: u.name,
+            age: u.age,
+            photos: u.photoUrl ? [u.photoUrl] : [],
+            distance: (u.distanceBucket ?? 'Nearby') as Distance,
+            activeMode: modeMap[u.mode ?? ''] ?? 'happening',
+            isVerified: u.verified ?? false,
+            isOnline: u.isOnline ?? false,
+            interests: u.interests ?? [],
+          }));
+          setNearbyUsers(normalized);
         });
       } catch (err) {
         console.error('[Socket] Connection failed:', err);

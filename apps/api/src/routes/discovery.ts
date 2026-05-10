@@ -10,17 +10,6 @@ const pingBody = z.object({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function haversineM(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 /** Get or create a DM chat between two users. */
 async function getOrCreateDm(app: FastifyInstance, a: string, b: string) {
   const existing = await app.prisma.chat.findFirst({
@@ -108,67 +97,6 @@ const discoveryRoutes: FastifyPluginAsync = async (app) => {
       page,
       limit,
       hasMore: skip + limit < total,
-    };
-  });
-
-  /**
-   * GET /users/:id
-   * Public profile view for a specific user.
-   */
-  app.get("/users/:id", { preHandler: [app.authenticate] }, async (req, reply) => {
-    const viewerId = requireUserId(req);
-    const targetId = z.string().min(1).parse((req.params as { id: string }).id);
-
-    if (targetId === viewerId) {
-      const self = await app.prisma.profile.findUnique({ where: { userId: viewerId } });
-      return self ?? reply.status(404).send({ error: "Not found" });
-    }
-
-    // Block check
-    const block = await app.prisma.block.findFirst({
-      where: {
-        OR: [
-          { blockerId: viewerId, blockedId: targetId },
-          { blockerId: targetId, blockedId: viewerId },
-        ],
-      },
-    });
-    if (block) return reply.status(404).send({ error: "Not found" });
-
-    // Location-based visibility: only show users within 1.5 km
-    const [viewerLoc, targetLoc] = await Promise.all([
-      app.prisma.userLocation.findUnique({ where: { userId: viewerId } }),
-      app.prisma.userLocation.findUnique({ where: { userId: targetId } }),
-    ]);
-
-    if (!viewerLoc || !targetLoc) {
-      return reply.status(404).send({ error: "Not found" });
-    }
-
-    const distM = haversineM(viewerLoc.lat, viewerLoc.lng, targetLoc.lat, targetLoc.lng);
-    if (distM > 1500) {
-      return reply.status(404).send({ error: "Not found" });
-    }
-
-    const [targetUser, profile] = await Promise.all([
-      app.prisma.user.findUnique({ where: { id: targetId } }),
-      app.prisma.profile.findUnique({ where: { userId: targetId } }),
-    ]);
-
-    if (!targetUser || !profile) return reply.status(404).send({ error: "Not found" });
-
-    return {
-      id: targetUser.id,
-      name: profile.name,
-      age: profile.age,
-      gender: profile.gender,
-      bio: profile.bio,
-      interests: profile.interests,
-      photos: profile.photos,
-      verified: profile.verified,
-      mode: profile.mode,
-      isOnline: targetUser.isOnline,
-      distanceBucket: app.geo.bucketForDistance(distM),
     };
   });
 

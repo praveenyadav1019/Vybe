@@ -1,198 +1,236 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  Switch,
-  StyleSheet,
-  Alert,
+  View, Text, TouchableOpacity, StyleSheet,
+  ScrollView, StatusBar, Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useMutation } from '@tanstack/react-query';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { api } from '@/lib/api';
+import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
-import { colors } from '@/theme/colors';
-import { GlassCard } from '@/components/ui/GlassCard';
 
-interface SettingsRowProps {
-  icon: string;
-  label: string;
-  onPress?: () => void;
-  value?: boolean;
-  isSwitch?: boolean;
-  onToggle?: (val: boolean) => void;
-  isDanger?: boolean;
-  subtitle?: string;
-  rightLabel?: string;
-}
+// ─── Color tokens ─────────────────────────────────────────────────────────────
+const ink    = '#1A1A2E';
+const inkSec = '#6B7280';
+const white  = '#FFFFFF';
+const brand  = '#7C3AED';
+const bgSec  = '#F9FAFB';
+const border = '#F3F4F6';
+const gold   = '#C9A84C';
+const goldL  = '#F5E3A0';
+const danger = '#EF4444';
 
-function SettingsRow({ icon, label, subtitle, onPress, value, isSwitch, onToggle, isDanger, rightLabel }: SettingsRowProps) {
+// ─── Section data ─────────────────────────────────────────────────────────────
+const SECTIONS = [
+  {
+    icon: 'lock-closed-outline' as const,
+    title: 'Privacy',
+    rows: [
+      { label: 'Privacy', route: '/(app)/settings/privacy' },
+      { label: 'Profile Visibility', route: '/(app)/settings/privacy' },
+      { label: 'Data Settings', route: '/(app)/settings/privacy' },
+    ],
+  },
+  {
+    icon: 'star-outline' as const,
+    title: 'Subscription (Vybeon Gold)',
+    rows: [
+      { label: 'Plan Details', route: '/(app)/premium' },
+      { label: 'Payment Methods', route: '/(app)/premium' },
+    ],
+  },
+  {
+    icon: 'notifications-outline' as const,
+    title: 'Notifications',
+    rows: [
+      { label: 'Push Notifications', route: null },
+      { label: 'Email Alerts', route: null },
+    ],
+  },
+  {
+    icon: 'help-circle-outline' as const,
+    title: 'Support',
+    rows: [
+      { label: 'Help Center', route: '/(app)/help' },
+      { label: 'Contact Us', route: null },
+    ],
+  },
+];
+
+// ─── Row component ────────────────────────────────────────────────────────────
+function SettingsRow({
+  label, onPress, isDanger,
+}: { label: string; onPress?: () => void; isDanger?: boolean }) {
   return (
     <TouchableOpacity
-      onPress={onPress}
-      disabled={isSwitch}
-      activeOpacity={0.7}
       style={styles.row}
+      onPress={onPress ?? (() => {})}
+      activeOpacity={onPress ? 0.75 : 1}
     >
-      <View style={[styles.rowIcon, { backgroundColor: isDanger ? `${colors.danger}22` : colors.surface }]}>
-        <Ionicons name={icon as any} size={18} color={isDanger ? colors.danger : colors.text} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.rowLabel, isDanger && { color: colors.danger }]}>{label}</Text>
-        {subtitle && <Text style={styles.rowSubtitle}>{subtitle}</Text>}
-      </View>
-      {isSwitch && onToggle ? (
-        <Switch value={value} onValueChange={onToggle} trackColor={{ false: colors.border, true: colors.primary }} thumbColor="#FFF" />
-      ) : rightLabel ? (
-        <Text style={styles.rightLabel}>{rightLabel}</Text>
-      ) : (
-        <Ionicons name="chevron-forward" size={16} color={colors.subtext} />
-      )}
+      <Text style={[styles.rowLabel, isDanger && { color: danger }]}>{label}</Text>
+      <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
     </TouchableOpacity>
   );
 }
 
-export default function SettingsScreen() {
-  const router = useRouter();
-  const { user, logout, updateUser } = useAuthStore();
-  const [notifications, setNotifications] = useState({
-    matches: true,
-    messages: true,
-    nearby: false,
-    email: false,
-  });
-
-  const notifMutation = useMutation({
-    mutationFn: (prefs: typeof notifications) => api.patch('/me', { notificationPrefs: prefs }),
-  });
-
-  const handleNotifToggle = (key: keyof typeof notifications, val: boolean) => {
-    const updated = { ...notifications, [key]: val };
-    setNotifications(updated);
-    notifMutation.mutate(updated);
-  };
-
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'This will permanently delete your account and all data. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => Alert.alert('Contact Support', 'Please email support@vybeon.com to delete your account.'),
-        },
-      ]
-    );
-  };
-
-  const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Logout', style: 'destructive', onPress: async () => { await logout(); router.replace('/(auth)/login'); } },
-    ]);
-  };
-
+// ─── Section component ────────────────────────────────────────────────────────
+function Section({
+  icon, title, rows, delay, onRowPress,
+}: {
+  icon: typeof SECTIONS[0]['icon'];
+  title: string;
+  rows: typeof SECTIONS[0]['rows'];
+  delay: number;
+  onRowPress: (route: string | null, label: string) => void;
+}) {
   return (
-    <SafeAreaView style={styles.container}>
-      <Animated.View entering={FadeInDown.delay(50)} style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
-        <View style={{ width: 40 }} />
-      </Animated.View>
-
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 80 }}>
-        {/* Account */}
-        <Animated.View entering={FadeInDown.delay(100)}>
-          <Text style={styles.groupLabel}>Account</Text>
-          <GlassCard style={styles.group}>
-            <SettingsRow icon="person-outline" label="Edit Profile" onPress={() => router.push('/(auth)/profile-setup')} />
-            <SettingsRow icon="shield-checkmark-outline" label="Verification" rightLabel={user?.isVerified ? '✓ Verified' : 'Not verified'} onPress={() => !user?.isVerified && router.push('/(auth)/face-verify')} />
-            <SettingsRow icon="star-outline" label="Subscription" rightLabel={user?.isPremium ? 'VYBEON+' : 'Free'} onPress={() => router.push('/(app)/premium')} />
-          </GlassCard>
-        </Animated.View>
-
-        {/* Discovery */}
-        <Animated.View entering={FadeInDown.delay(150)}>
-          <Text style={styles.groupLabel}>Discovery</Text>
-          <GlassCard style={styles.group}>
-            <SettingsRow icon="radio-outline" label="Discovery Radius" rightLabel="500m" onPress={() => Alert.alert('Radius', 'Adjust in Privacy Settings')} />
-            <SettingsRow icon="eye-outline" label="Show Me To" rightLabel="Everyone" onPress={() => router.push('/(app)/settings/privacy')} />
-            <SettingsRow icon="people-outline" label="Age Range" rightLabel="18 - 35" onPress={() => Alert.alert('Age Filter', 'Coming soon in next update')} />
-          </GlassCard>
-        </Animated.View>
-
-        {/* Privacy */}
-        <Animated.View entering={FadeInDown.delay(200)}>
-          <Text style={styles.groupLabel}>Privacy</Text>
-          <GlassCard style={styles.group}>
-            <SettingsRow icon="lock-closed-outline" label="Privacy Settings" onPress={() => router.push('/(app)/settings/privacy')} />
-            <SettingsRow icon="ban-outline" label="Blocked Users" onPress={() => router.push('/(app)/safety')} />
-            <SettingsRow icon="document-text-outline" label="Data & Privacy" onPress={() => Alert.alert('Data', 'Your data is stored securely. Email privacy@vybeon.com for requests.')} />
-          </GlassCard>
-        </Animated.View>
-
-        {/* Notifications */}
-        <Animated.View entering={FadeInDown.delay(250)}>
-          <Text style={styles.groupLabel}>Notifications</Text>
-          <GlassCard style={styles.group}>
-            <SettingsRow icon="heart-outline" label="New Matches" isSwitch value={notifications.matches} onToggle={(v) => handleNotifToggle('matches', v)} />
-            <SettingsRow icon="chatbubble-outline" label="Messages" isSwitch value={notifications.messages} onToggle={(v) => handleNotifToggle('messages', v)} />
-            <SettingsRow icon="location-outline" label="Nearby Alerts" isSwitch value={notifications.nearby} onToggle={(v) => handleNotifToggle('nearby', v)} />
-            <SettingsRow icon="mail-outline" label="Email Notifications" isSwitch value={notifications.email} onToggle={(v) => handleNotifToggle('email', v)} />
-          </GlassCard>
-        </Animated.View>
-
-        {/* Support */}
-        <Animated.View entering={FadeInDown.delay(300)}>
-          <Text style={styles.groupLabel}>Support</Text>
-          <GlassCard style={styles.group}>
-            <SettingsRow icon="help-circle-outline" label="Help Center" onPress={() => Alert.alert('Help', 'Email support@vybeon.com for help')} />
-            <SettingsRow icon="flag-outline" label="Report a Problem" onPress={() => router.push('/(app)/safety')} />
-            <SettingsRow icon="star-outline" label="Rate the App" onPress={() => Alert.alert('Rate', 'Thank you! Rating coming soon')} />
-          </GlassCard>
-        </Animated.View>
-
-        {/* About */}
-        <Animated.View entering={FadeInDown.delay(350)}>
-          <Text style={styles.groupLabel}>About</Text>
-          <GlassCard style={styles.group}>
-            <SettingsRow icon="document-outline" label="Terms of Service" onPress={() => Alert.alert('Terms', 'Visit vybeon.com/terms')} />
-            <SettingsRow icon="shield-outline" label="Privacy Policy" onPress={() => Alert.alert('Privacy', 'Visit vybeon.com/privacy')} />
-            <SettingsRow icon="information-circle-outline" label="Version" rightLabel="1.0.0" />
-          </GlassCard>
-        </Animated.View>
-
-        {/* Danger Zone */}
-        <Animated.View entering={FadeInDown.delay(400)}>
-          <Text style={styles.groupLabel}>Account Actions</Text>
-          <GlassCard style={styles.group}>
-            <SettingsRow icon="log-out-outline" label="Logout" onPress={handleLogout} isDanger />
-            <SettingsRow icon="trash-outline" label="Delete Account" onPress={handleDeleteAccount} isDanger />
-          </GlassCard>
-        </Animated.View>
-      </ScrollView>
-    </SafeAreaView>
+    <Animated.View entering={FadeInDown.delay(delay).duration(380)} style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Ionicons name={icon} size={16} color={inkSec} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      <View style={styles.sectionBody}>
+        {rows.map((row, i) => (
+          <React.Fragment key={row.label}>
+            <SettingsRow
+              label={row.label}
+              onPress={() => onRowPress(row.route, row.label)}
+            />
+            {i < rows.length - 1 && <View style={styles.rowDivider} />}
+          </React.Fragment>
+        ))}
+      </View>
+    </Animated.View>
   );
 }
 
+// ─── Main screen ──────────────────────────────────────────────────────────────
+export default function AccountSettingsScreen() {
+  const insets  = useSafeAreaInsets();
+  const router  = useRouter();
+  const logout  = useAuthStore((s) => s.logout);
+  const user    = useAuthStore((s) => s.user);
+  const isPremium = user?.isPremium ?? false;
+
+  function handleRowPress(route: string | null, label: string) {
+    if (route) {
+      router.push(route as any);
+    } else {
+      Alert.alert(label, 'Coming soon!');
+    }
+  }
+
+  function handleLogout() {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign Out', style: 'destructive', onPress: () => logout() },
+    ]);
+  }
+
+  return (
+    <View style={[styles.root, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="dark-content" backgroundColor={white} />
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+
+        {/* ── Title ───────────────────────────────────────────────────── */}
+        <Animated.View entering={FadeInDown.delay(0).duration(350)} style={styles.titleRow}>
+          <Text style={styles.title}>Account Settings</Text>
+        </Animated.View>
+
+        {/* ── Gold membership card ─────────────────────────────────────── */}
+        <Animated.View entering={FadeInDown.delay(60).duration(380)} style={styles.cardWrap}>
+          <LinearGradient
+            colors={['#C9A84C', '#F5E3A0', '#C9A84C']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={styles.goldCard}
+          >
+            <View style={styles.goldCardTop}>
+              <Ionicons name="star" size={18} color="#7A5B10" />
+              <Text style={styles.goldCardTitle}>Vybeon Gold Member</Text>
+            </View>
+            <Text style={styles.goldCardSub}>
+              Active until Dec 31. Unlocks exclusive features and connections.
+            </Text>
+            <TouchableOpacity
+              style={styles.manageBtn}
+              onPress={() => router.push('/(app)/premium' as any)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.manageBtnText}>Manage Subscription</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        </Animated.View>
+
+        {/* ── Settings sections ────────────────────────────────────────── */}
+        {SECTIONS.map((sec, i) => (
+          <Section
+            key={sec.title}
+            icon={sec.icon}
+            title={sec.title}
+            rows={sec.rows}
+            delay={120 + i * 60}
+            onRowPress={handleRowPress}
+          />
+        ))}
+
+        {/* ── Sign out ─────────────────────────────────────────────────── */}
+        <Animated.View entering={FadeInDown.delay(380).duration(380)} style={styles.section}>
+          <View style={styles.sectionBody}>
+            <SettingsRow label="Sign Out" onPress={handleLogout} isDanger />
+          </View>
+        </Animated.View>
+      </ScrollView>
+    </View>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { color: colors.text, fontSize: 18, fontWeight: '700' },
-  groupLabel: { color: colors.subtext, fontSize: 12, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase', paddingHorizontal: 16, marginTop: 16, marginBottom: 6 },
-  group: { marginHorizontal: 16 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.border },
-  rowIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  rowLabel: { color: colors.text, fontSize: 15 },
-  rowSubtitle: { color: colors.subtext, fontSize: 12, marginTop: 1 },
-  rightLabel: { color: colors.subtext, fontSize: 13 },
+  root: { flex: 1, backgroundColor: white },
+
+  titleRow: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  title: { fontSize: 28, fontWeight: '800', color: ink },
+
+  // ── Gold card ──────────────────────────────────────────────────────────────
+  cardWrap: { paddingHorizontal: 20, marginBottom: 20 },
+  goldCard: {
+    borderRadius: 20,
+    padding: 20,
+  },
+  goldCardTop: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  goldCardTitle: { fontSize: 16, fontWeight: '700', color: '#7A5B10' },
+  goldCardSub: { fontSize: 13, color: '#8A6820', lineHeight: 18, marginBottom: 14 },
+  manageBtn: {
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderRadius: 9999,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  manageBtnText: { fontSize: 14, fontWeight: '700', color: '#7A5B10' },
+
+  // ── Sections ──────────────────────────────────────────────────────────────
+  section: { marginHorizontal: 20, marginBottom: 16 },
+  sectionHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginBottom: 8,
+  },
+  sectionTitle: { fontSize: 12, fontWeight: '600', color: inkSec, textTransform: 'uppercase', letterSpacing: 0.6 },
+  sectionBody: {
+    backgroundColor: bgSec,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+
+  row: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 14,
+  },
+  rowLabel: { fontSize: 15, color: ink },
+  rowDivider: { height: 1, backgroundColor: border, marginLeft: 16 },
 });

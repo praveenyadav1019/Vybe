@@ -25,6 +25,7 @@ export const colors = {
     'night-out': '#7C3AED',
     'club-mates': '#00E5FF',
     casual: '#A1A1AA',
+    happening: '#F59E0B',
   },
 
   // Gradients (as arrays for LinearGradient)

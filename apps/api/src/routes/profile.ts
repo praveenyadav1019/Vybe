@@ -41,6 +41,30 @@ const profileRoutes: FastifyPluginAsync = async (app) => {
   app.get("/me", { preHandler: [app.authenticate] }, async (req, reply) => {
     const userId = requireUserId(req);
 
+    // Dev bypass: return a mock user so the app stays logged in during local testing
+    if (app.env.NODE_ENV !== "production" && userId === "dev-user-1") {
+      return {
+        user: {
+          id: "dev-user-1",
+          phone: "***-dev",
+          name: "Praveen",
+          age: 26,
+          gender: "male",
+          bio: "Dev user for local testing",
+          photos: ["https://randomuser.me/api/portraits/men/10.jpg"],
+          interests: ["Music", "Travel", "Nightlife"],
+          isVerified: true,
+          isPremium: false,
+          activeMode: "happening",
+          isOnline: true,
+          lastSeen: new Date().toISOString(),
+          safetyMode: false,
+          privacyLevel: "public",
+          createdAt: new Date().toISOString(),
+        },
+      };
+    }
+
     const user = await app.prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -55,21 +79,35 @@ const profileRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(404).send({ error: "User not found" });
     }
 
+    const p = user.profile;
+    const modeMap: Record<string, string> = {
+      dating: "dating",
+      hook: "hook",
+      co_travel: "co-travel",
+      night_out: "night-out",
+      club_mates: "club-mates",
+      happening: "happening",
+    };
+
     return {
-      id: user.id,
-      // Mask last 4 digits of phone for privacy
-      phone: user.phone.slice(0, -4) + "****",
-      isOnline: user.isOnline,
-      lastSeen: user.lastSeen,
-      pushToken: undefined, // never expose push token
-      profile: user.profile,
-      verification: user.verification
-        ? { status: user.verification.status }
-        : { status: "none" },
-      subscription: user.subscription
-        ? { plan: user.subscription.plan, expiresAt: user.subscription.expiresAt }
-        : { plan: "free" },
-      hasLocation: !!user.location,
+      user: {
+        id: user.id,
+        phone: user.phone.slice(0, -4) + "****",
+        name: p?.name ?? "",
+        age: p?.age ?? 0,
+        gender: p?.gender ?? "prefer-not-to-say",
+        bio: p?.bio ?? undefined,
+        photos: p?.photos ?? [],
+        interests: p?.interests ?? [],
+        isVerified: p?.verified ?? false,
+        isPremium: user.subscription?.plan !== "free",
+        activeMode: modeMap[p?.mode ?? "happening"] ?? "happening",
+        isOnline: user.isOnline,
+        lastSeen: user.lastSeen.toISOString(),
+        safetyMode: p?.safetyMode ?? false,
+        privacyLevel: "public",
+        createdAt: user.createdAt.toISOString(),
+      },
     };
   });
 

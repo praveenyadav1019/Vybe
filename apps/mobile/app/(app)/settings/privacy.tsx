@@ -93,7 +93,7 @@ export default function PrivacySettingsScreen() {
           <Text style={styles.groupLabel}>Location Privacy</Text>
           <GlassCard style={styles.group}>
             <View style={styles.infoRow}>
-              <Ionicons name="location-off-outline" size={18} color={colors.success} />
+              <Ionicons name="location-outline" size={18} color={colors.success} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.infoLabel}>Exact Location Never Shared</Text>
                 <Text style={styles.infoDesc}>Only "Same venue", "Within 100m" or "Nearby" is shown to others</Text>

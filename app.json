@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "aa844fbe-5e73-49c6-a230-210cfb8ad8df"
+      }
+    },
+    "android": {
+      "package": "com.vybeon.app"
+    }
+  }
+}
