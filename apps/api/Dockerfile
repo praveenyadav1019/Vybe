@@ -51,8 +51,9 @@ COPY --from=builder /mono/apps/api/prisma ./prisma/
 COPY --from=builder /mono/node_modules ./node_modules/
 COPY --from=builder /mono/apps/api/package.json ./package.json
 
-# Overlay compiled types package so @vybeon/types resolves at runtime
-RUN mkdir -p ./node_modules/@vybeon/types
+# Overlay compiled types package so @vybeon/types resolves at runtime.
+# The workspace symlink copied from the builder is dangling here, so remove it first.
+RUN rm -rf ./node_modules/@vybeon
 COPY --from=builder /mono/packages/types ./node_modules/@vybeon/types/
 
 # Re-generate Prisma client in production environment
