@@ -154,10 +154,10 @@ const styles = StyleSheet.create({
   },
 
   wordmark: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: T.weight.black,
-    color: '#1A1A2E',
-    letterSpacing: T.tracking.widest,   // 2px — matches reference
+    color: '#111827',
+    letterSpacing: T.tracking.widest,
     marginBottom: 8,
   },
 
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
   },
   bar: {
     width: 88,
-    height: 2.5,
+    height: 3,
     borderRadius: 9999,
   },
 });

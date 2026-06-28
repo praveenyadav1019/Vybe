@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { requireUserId } from "../lib/auth.js";
+import { createPresignedUpload, isStorageConfigured, ALLOWED_IMAGE_TYPES } from "../lib/storage.js";
 import path from "path";
 
 // ─── Validation schemas ───────────────────────────────────────────────────────
@@ -25,9 +26,12 @@ const photoUrlsBody = z.object({
   urls: z.array(z.string().url()).min(1).max(6),
 });
 
+const presignBody = z.object({
+  contentType: z.enum(ALLOWED_IMAGE_TYPES),
+});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic"];
 const MAX_PHOTO_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_PHOTOS = 6;
 
@@ -92,7 +96,7 @@ const profileRoutes: FastifyPluginAsync = async (app) => {
     return {
       user: {
         id: user.id,
-        phone: user.phone.slice(0, -4) + "****",
+        phone: user.phone ? user.phone.slice(0, -4) + "****" : "",
         name: p?.name ?? "",
         age: p?.age ?? 0,
         gender: p?.gender ?? "prefer-not-to-say",
@@ -153,6 +157,30 @@ const profileRoutes: FastifyPluginAsync = async (app) => {
     });
 
     return { ok: true, profile };
+  });
+
+  /**
+   * POST /me/photos/presign
+   * Return a short-lived presigned PUT URL for a single image plus the final
+   * CDN URL. The client uploads the file to `uploadUrl`, then calls
+   * `POST /me/photos` with `publicUrl`.
+   */
+  app.post("/me/photos/presign", { preHandler: [app.authenticate] }, async (req, reply) => {
+    const userId = requireUserId(req);
+
+    if (!isStorageConfigured(app.env)) {
+      return reply.status(503).send({ error: "Photo storage is not configured" });
+    }
+
+    let body: z.infer<typeof presignBody>;
+    try {
+      body = presignBody.parse(req.body);
+    } catch {
+      return reply.status(400).send({ error: "contentType must be a supported image type" });
+    }
+
+    const presigned = await createPresignedUpload(app.env, userId, body.contentType);
+    return { ok: true, ...presigned };
   });
 
   /**

@@ -25,3 +25,6 @@ apps/api/prisma/migrations/**/migration_lock.toml
 
 # Keep package dist folders (needed for EAS builds)
 !packages/*/dist/
+
+# Temporary Claude Code agent worktrees
+.claude/worktrees/

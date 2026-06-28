@@ -1,5 +1,6 @@
 import '../global.css';
 import { useEffect } from 'react';
+import { Platform, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -11,6 +12,10 @@ import { useAuthStore } from '../src/stores/authStore';
 import { useUserStore } from '../src/stores/userStore';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
+
+if (Platform.OS === 'web' && typeof StyleSheet.setFlag === 'function') {
+  StyleSheet.setFlag('darkMode', 'class');
+}
 
 export default function RootLayout() {
   const initialize = useAuthStore((s) => s.initialize);

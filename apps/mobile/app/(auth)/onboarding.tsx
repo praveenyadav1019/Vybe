@@ -38,52 +38,34 @@ const PAGES: OnboardingPage[] = [
   {
     id: 'discover',
     icon: 'radio',
-    iconColor: '#00E5FF',
-    gradientColors: ['#0A0A1A', '#0A1A2E'],
+    iconColor: '#2563EB',
+    gradientColors: ['#EEF4FF', '#F6F2FF'],
     headline: 'Discover Nearby Vibes',
     subtitle:
       'Find people who are living their best moments right now — at rooftop bars, underground clubs, late-night spots, and hidden gems near you.',
-    accentOrbs: ['rgba(0,229,255,0.15)', 'rgba(124,58,237,0.1)'],
+    accentOrbs: ['rgba(37,99,235,0.10)', 'rgba(124,58,237,0.08)'],
   },
   {
-    id: 'modes',
-    icon: 'flame',
+    id: 'connect',
+    icon: 'chatbubbles',
     iconColor: '#7C3AED',
-    gradientColors: ['#0A0A1A', '#1A0A2E'],
-    headline: 'Your Mode, Your World',
+    gradientColors: ['#F4F0FF', '#EFF4FF'],
+    headline: 'Connect Instantly',
     subtitle:
-      'Switch between Dating, Night Out, Club Mates, and Co-Travel modes. Every interaction is on your terms — you control the vibe, always.',
-    accentOrbs: ['rgba(124,58,237,0.15)', 'rgba(0,229,255,0.08)'],
+      'Chat with people nearby or anywhere in the world. Real conversations, real connections — start vibing the moment you match.',
+    accentOrbs: ['rgba(124,58,237,0.10)', 'rgba(37,99,235,0.07)'],
   },
   {
     id: 'safety',
     icon: 'shield-checkmark',
-    iconColor: '#22C55E',
-    gradientColors: ['#0A0A1A', '#0A1A0A'],
+    iconColor: '#16A34A',
+    gradientColors: ['#ECFDF3', '#F4FFF8'],
     headline: 'Safety First, Always',
     subtitle:
       'Every profile is verified. Consent is built into every interaction. Our women-safety mode and real-time reporting keep you protected 24/7.',
-    accentOrbs: ['rgba(34,197,94,0.12)', 'rgba(124,58,237,0.1)'],
+    accentOrbs: ['rgba(34,197,94,0.10)', 'rgba(124,58,237,0.07)'],
   },
 ];
-
-const ModeGrid = () => (
-  <View style={styles.modeGrid}>
-    {[
-      { icon: 'heart', label: 'Dating', color: '#FF4D6D' },
-      { icon: 'moon', label: 'Night Out', color: '#7C3AED' },
-      { icon: 'people', label: 'Club Mates', color: '#00E5FF' },
-      { icon: 'airplane', label: 'Co-Travel', color: '#22C55E' },
-    ].map((mode) => (
-      <View key={mode.label} style={styles.modeItem}>
-        <View style={[styles.modeIcon, { borderColor: mode.color + '55' }]}>
-          <Ionicons name={mode.icon as keyof typeof Ionicons.glyphMap} size={22} color={mode.color} />
-        </View>
-        <Text style={styles.modeLabel}>{mode.label}</Text>
-      </View>
-    ))}
-  </View>
-);
 
 const SafetyFeatures = () => (
   <View style={styles.safetyList}>
@@ -120,7 +102,6 @@ function OnboardingSlide({ item, index }: { item: OnboardingPage; index: number 
         </View>
 
         {/* Extra content per slide */}
-        {index === 1 && <ModeGrid />}
         {index === 2 && <SafetyFeatures />}
       </View>
 
@@ -235,7 +216,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#F3F4F6',
   },
   skipText: {
     color: colors.subtext,

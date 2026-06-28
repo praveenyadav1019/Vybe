@@ -1,167 +1,178 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Dimensions, ScrollView, StatusBar,
+  Dimensions, FlatList, StatusBar, ScrollView,
 } from 'react-native';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, {
+  FadeInDown, useSharedValue, useAnimatedStyle,
+  withRepeat, withTiming, withSequence,
+} from 'react-native-reanimated';
+import { useDiscoveryStore } from '../../src/stores/discoveryStore';
+import { useLocationStore } from '../../src/stores/locationStore';
+import type { NearbyUser } from '../../src/types';
 
 const { width: W } = Dimensions.get('window');
-const CARD_W = (W - 48) / 2;   // 2-column grid with 16px gap + 16px margins
-
-// ─── Mode definitions ─────────────────────────────────────────────────────────
-const MODES = [
-  {
-    key: 'dating',
-    label: 'Dating Mode',
-    sub: 'Find your perfect match',
-    icon: 'heart' as const,
-    iconColor: '#E11D48',
-    bgColor: '#FFF0F3',
-    ringColor: '#FECDD3',
-    route: '/(app)/modes/dating',
-  },
-  {
-    key: 'co-travel',
-    label: 'Co-Travel Mode',
-    sub: 'Find travel buddies',
-    icon: 'globe-outline' as const,
-    iconColor: '#2563EB',
-    bgColor: '#EFF6FF',
-    ringColor: '#BFDBFE',
-    route: '/(app)/modes/co-travel',
-  },
-  {
-    key: 'night-out',
-    label: 'Night Out Mode',
-    sub: 'Find people to party',
-    icon: 'moon' as const,
-    iconColor: '#D97706',
-    bgColor: '#FFFBEB',
-    ringColor: '#FDE68A',
-    route: '/(app)/modes/night-out',
-  },
-  {
-    key: 'hook',
-    label: 'Hook Up Mode',
-    sub: 'For casual connections',
-    icon: 'infinite-outline' as const,
-    iconColor: '#059669',
-    bgColor: '#ECFDF5',
-    ringColor: '#A7F3D0',
-    route: '/(app)/modes/hook',
-  },
-  {
-    key: 'club-mates',
-    label: 'Club Mates',
-    sub: 'Meet at the same venue',
-    icon: 'people-outline' as const,
-    iconColor: '#7C3AED',
-    bgColor: '#F5F3FF',
-    ringColor: '#DDD6FE',
-    route: '/(app)/modes/club-mates',
-  },
-  {
-    key: 'casual',
-    label: 'Just Vibing',
-    sub: 'Keep it chill & casual',
-    icon: 'cafe-outline' as const,
-    iconColor: '#0891B2',
-    bgColor: '#ECFEFF',
-    ringColor: '#A5F3FC',
-    route: '/(app)/modes/night-out',
-  },
-] as const;
+const CARD_W = (W - 48) / 2;
 
 // ─── Color tokens ─────────────────────────────────────────────────────────────
-const ink    = '#1A1A2E';
-const inkSec = '#6B7280';
-const white  = '#FFFFFF';
-const brand  = '#7C3AED';
+const ink     = '#111827';
+const inkSec  = '#6B7280';
+const muted    = '#9CA3AF';
+const white   = '#FFFFFF';
+const brand   = '#7C3AED';
+const bgSec   = '#F9FAFB';
+const border   = '#ECECF1';
+const success = '#22C55E';
 
-// ─── Mode card ────────────────────────────────────────────────────────────────
-function ModeCard({
-  mode, delay, onPress,
-}: {
-  mode: typeof MODES[number];
-  delay: number;
-  onPress: () => void;
-}) {
+type Gender = 'all' | 'female' | 'male';
+
+const GENDERS: { key: Gender; label: string }[] = [
+  { key: 'all',    label: 'All' },
+  { key: 'female', label: 'Female' },
+  { key: 'male',   label: 'Male' },
+];
+
+// ─── Fallback mock people (shown when backend isn't connected) ─────────────────
+const MOCK: (NearbyUser & { gender: Exclude<Gender, 'all'> })[] = [
+  { id: 'm1', name: 'Aisha', age: 24, distance: '450 m', isOnline: true,  photos: ['https://randomuser.me/api/portraits/women/65.jpg'], gender: 'female' } as any,
+  { id: 'm2', name: 'Rohan', age: 27, distance: '1.1 km', isOnline: true,  photos: ['https://randomuser.me/api/portraits/men/22.jpg'],   gender: 'male' } as any,
+  { id: 'm3', name: 'Maya',  age: 23, distance: '1.8 km', isOnline: false, photos: ['https://randomuser.me/api/portraits/women/12.jpg'], gender: 'female' } as any,
+  { id: 'm4', name: 'Kabir', age: 29, distance: '2.3 km', isOnline: true,  photos: ['https://randomuser.me/api/portraits/men/45.jpg'],   gender: 'male' } as any,
+  { id: 'm5', name: 'Riya',  age: 25, distance: '3.0 km', isOnline: false, photos: ['https://randomuser.me/api/portraits/women/33.jpg'], gender: 'female' } as any,
+  { id: 'm6', name: 'Dev',   age: 26, distance: '3.6 km', isOnline: true,  photos: ['https://randomuser.me/api/portraits/men/57.jpg'],   gender: 'male' } as any,
+];
+
+// ─── Live pulse dot ─────────────────────────────────────────────────────────────
+function PulseDot() {
+  const scale = useSharedValue(1);
+  const opacity = useSharedValue(0.85);
+  useEffect(() => {
+    scale.value = withRepeat(withSequence(withTiming(1.5, { duration: 700 }), withTiming(1, { duration: 700 })), -1);
+    opacity.value = withRepeat(withSequence(withTiming(0.3, { duration: 700 }), withTiming(0.85, { duration: 700 })), -1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }], opacity: opacity.value }));
+  return <Animated.View style={[styles.pulseDot, style]} />;
+}
+
+// ─── Person card ──────────────────────────────────────────────────────────────
+function PersonCard({ person, index, onPress }: { person: NearbyUser; index: number; onPress: () => void }) {
+  const photo = (person as any).photos?.[0];
   return (
-    <Animated.View entering={FadeInDown.delay(delay).duration(380)} style={{ width: CARD_W }}>
-      <TouchableOpacity
-        style={[styles.card, { backgroundColor: mode.bgColor }]}
-        activeOpacity={0.82}
-        onPress={onPress}
-      >
-        {/* Icon circle */}
-        <View style={[styles.iconCircle, { backgroundColor: mode.ringColor }]}>
-          <Ionicons name={mode.icon} size={32} color={mode.iconColor} />
+    <Animated.View entering={FadeInDown.delay(index * 50).duration(360)} style={{ width: CARD_W }}>
+      <TouchableOpacity style={styles.card} activeOpacity={0.88} onPress={onPress}>
+        {photo ? (
+          <Image source={{ uri: photo }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+        ) : (
+          <View style={[StyleSheet.absoluteFillObject, styles.cardFallback]}>
+            <Ionicons name="person" size={40} color={brand} />
+          </View>
+        )}
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.72)']}
+          locations={[0.4, 1]}
+          style={StyleSheet.absoluteFillObject}
+        />
+        {(person as any).isOnline && (
+          <View style={styles.onlineTag}>
+            <View style={styles.onlineDot} />
+            <Text style={styles.onlineText}>Online</Text>
+          </View>
+        )}
+        <View style={styles.cardInfo}>
+          <Text style={styles.cardName} numberOfLines={1}>
+            {person.name}{(person as any).age ? `, ${(person as any).age}` : ''}
+          </Text>
+          <View style={styles.distRow}>
+            <Ionicons name="location" size={11} color="rgba(255,255,255,0.85)" />
+            <Text style={styles.cardDist}>{(person as any).distance ?? 'Nearby'}</Text>
+          </View>
         </View>
-
-        {/* Text */}
-        <Text style={styles.cardTitle}>{mode.label}</Text>
-        <Text style={styles.cardSub}>{mode.sub}</Text>
       </TouchableOpacity>
     </Animated.View>
   );
 }
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
-export default function ModeSelectionScreen() {
+export default function RadarScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const [gender, setGender] = useState<Gender>('all');
 
-  const rows: [typeof MODES[number], typeof MODES[number]][] = [];
-  for (let i = 0; i < MODES.length; i += 2) {
-    rows.push([MODES[i], MODES[i + 1]]);
-  }
+  const nearbyUsers = useDiscoveryStore((s) => s.nearbyUsers);
+  const city = useLocationStore((s) => s.city);
+
+  // Use live data if present, otherwise fall back to mock so the screen is populated.
+  const source: any[] = nearbyUsers && nearbyUsers.length > 0 ? nearbyUsers : MOCK;
+  const people = source.filter((p) => gender === 'all' || p.gender === gender);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <StatusBar barStyle="dark-content" backgroundColor={white} />
 
-      {/* ── Header ──────────────────────────────────────────────────────── */}
+      {/* Header */}
       <Animated.View entering={FadeInDown.delay(0).duration(350)} style={styles.header}>
-        <Text style={styles.title}>Choose your mode</Text>
+        <View>
+          <View style={styles.titleRow}>
+            <PulseDot />
+            <Text style={styles.title}>Nearby</Text>
+          </View>
+          <Text style={styles.subtitle}>
+            {people.length} people {city ? `around ${city}` : 'around you'}
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.mapBtn} activeOpacity={0.85} onPress={() => router.push('/(app)/radar' as any)}>
+          <Ionicons name="navigate" size={16} color={brand} />
+          <Text style={styles.mapBtnText}>Map</Text>
+        </TouchableOpacity>
       </Animated.View>
 
-      {/* ── Mode grid ───────────────────────────────────────────────────── */}
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.grid, { paddingBottom: insets.bottom + 24 }]}
-      >
-        {rows.map(([left, right], rowIdx) => (
-          <View key={rowIdx} style={styles.row}>
-            <ModeCard
-              mode={left}
-              delay={rowIdx * 80 + 60}
-              onPress={() => router.push(left.route as any)}
-            />
-            {right && (
-              <ModeCard
-                mode={right}
-                delay={rowIdx * 80 + 120}
-                onPress={() => router.push(right.route as any)}
-              />
-            )}
-          </View>
-        ))}
+      {/* Gender filter */}
+      <Animated.View entering={FadeInDown.delay(40).duration(350)}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          {GENDERS.map((g) => {
+            const active = gender === g.key;
+            return (
+              <TouchableOpacity
+                key={g.key}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => setGender(g.key)}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{g.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </Animated.View>
 
-        {/* ── Discover nearby button ──────────────────────────────────── */}
-        <Animated.View entering={FadeInDown.delay(560).duration(380)} style={styles.discoverWrap}>
-          <TouchableOpacity
-            style={styles.discoverBtn}
-            activeOpacity={0.85}
-            onPress={() => router.push('/(app)/radar' as any)}
-          >
-            <Ionicons name="navigate-circle-outline" size={20} color={brand} />
-            <Text style={styles.discoverText}>Open Radar Map</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      </ScrollView>
+      {/* People grid */}
+      <FlatList
+        data={people}
+        keyExtractor={(item) => item.id}
+        numColumns={2}
+        columnWrapperStyle={styles.row}
+        contentContainerStyle={[styles.grid, { paddingBottom: insets.bottom + 90 }]}
+        showsVerticalScrollIndicator={false}
+        renderItem={({ item, index }) => (
+          <PersonCard
+            person={item}
+            index={index}
+            onPress={() => router.push(`/(app)/user/${item.id}` as any)}
+          />
+        )}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Ionicons name="people-outline" size={48} color={border} />
+            <Text style={styles.emptyText}>No {gender !== 'all' ? `${gender} ` : ''}people nearby</Text>
+          </View>
+        }
+      />
     </View>
   );
 }
@@ -171,74 +182,53 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: white },
 
   header: {
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 8,
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 10,
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: ink,
-    letterSpacing: -0.3,
-  },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  title: { fontSize: 24, fontWeight: '800', color: ink, letterSpacing: -0.4 },
+  subtitle: { fontSize: 12, color: inkSec, marginTop: 2 },
+  pulseDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: success },
 
-  grid: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    gap: 16,
+  mapBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999,
+    backgroundColor: '#F5F3FF', borderWidth: 1, borderColor: '#E9E2FF',
   },
-  row: {
-    flexDirection: 'row',
-    gap: 16,
+  mapBtnText: { fontSize: 13, fontWeight: '700', color: brand },
+
+  chipRow: { paddingHorizontal: 20, gap: 8, paddingBottom: 14 },
+  chip: {
+    paddingHorizontal: 16, paddingVertical: 7, borderRadius: 999,
+    backgroundColor: white, borderWidth: 1, borderColor: '#E5E7EB',
   },
+  chipActive: { backgroundColor: brand, borderColor: brand },
+  chipText: { fontSize: 13, fontWeight: '600', color: inkSec },
+  chipTextActive: { color: white },
+
+  grid: { paddingHorizontal: 16, gap: 16 },
+  row: { gap: 16 },
 
   card: {
-    flex: 1,
+    height: CARD_W * 1.32,
     borderRadius: 20,
-    padding: 20,
-    minHeight: 170,
-    alignItems: 'flex-start',
-    justifyContent: 'flex-end',
+    overflow: 'hidden',
+    backgroundColor: bgSec,
   },
-  iconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
+  cardFallback: { backgroundColor: '#EDE9FE', alignItems: 'center', justifyContent: 'center' },
+  onlineTag: {
+    position: 'absolute', top: 10, left: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999,
   },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: ink,
-    marginBottom: 3,
-  },
-  cardSub: {
-    fontSize: 12,
-    color: inkSec,
-    lineHeight: 16,
-  },
+  onlineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: success },
+  onlineText: { fontSize: 10, fontWeight: '700', color: white },
+  cardInfo: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 12 },
+  cardName: { fontSize: 15, fontWeight: '700', color: white },
+  distRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
+  cardDist: { fontSize: 11, color: 'rgba(255,255,255,0.85)' },
 
-  discoverWrap: {
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  discoverBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 9999,
-    borderWidth: 1.5,
-    borderColor: '#DDD6FE',
-    backgroundColor: '#F5F3FF',
-  },
-  discoverText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: brand,
-  },
+  empty: { alignItems: 'center', marginTop: 80, gap: 12 },
+  emptyText: { fontSize: 15, color: inkSec },
 });

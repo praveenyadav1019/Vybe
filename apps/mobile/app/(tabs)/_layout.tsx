@@ -34,7 +34,6 @@ function CustomTabBar({ state, navigation }: {
 
   return (
     <View style={[styles.tabBarWrapper, { paddingBottom: insets.bottom + 6 }]}>
-      <BlurView intensity={80} style={StyleSheet.absoluteFill} />
       <View style={styles.topBorder} />
       <View style={styles.tabBar}>
         {state.routes.map((route, index) => {
@@ -69,7 +68,7 @@ function CustomTabBar({ state, navigation }: {
                       : `${tab.icon}-outline`) as React.ComponentProps<typeof Ionicons>['name']
                   }
                   size={24}
-                  color={isFocused ? colors.primary : colors.subtext}
+                  color={isFocused ? ACTIVE : INACTIVE}
                 />
                 {unreadCount > 0 && (
                   <View style={styles.badge}>
@@ -79,12 +78,7 @@ function CustomTabBar({ state, navigation }: {
                   </View>
                 )}
               </View>
-              <Text
-                style={[
-                  styles.tabLabel,
-                  isFocused && { color: colors.primary },
-                ]}
-              >
+              <Text style={[styles.tabLabel, isFocused && { color: ACTIVE, fontWeight: '600' }]}>
                 {tab.label}
               </Text>
             </TouchableOpacity>
@@ -95,17 +89,20 @@ function CustomTabBar({ state, navigation }: {
   );
 }
 
+const ACTIVE = '#7C3AED';
+const INACTIVE = '#9CA3AF';
+
 const styles = StyleSheet.create({
   tabBarWrapper: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(255,255,255,0.96)',
+    backgroundColor: '#FFFFFF',
   },
   topBorder: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#F1F1F5',
+    backgroundColor: '#ECECF1',
   },
   tabBar: {
     flexDirection: 'row',
@@ -139,7 +136,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   tabLabel: {
-    color: colors.subtext,
+    color: INACTIVE,
     fontSize: 10,
     fontWeight: '500',
   },

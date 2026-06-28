@@ -1,6 +1,7 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyPluginAsync, FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import crypto from "crypto";
+import { isVerifyConfigured, startVerification, checkVerification } from "../lib/twilio.js";
 
 // ─── Validation schemas ───────────────────────────────────────────────────────
 
@@ -24,6 +25,19 @@ const refreshBody = z.object({
 const logoutBody = z.object({
   refreshToken: z.string().min(10),
 });
+
+const googleBody = z.object({
+  idToken: z.string().min(20),
+  deviceId: z.string().min(8).max(128),
+  deviceName: z.string().max(64).optional(),
+  platform: z.enum(["ios", "android", "web"]).optional(),
+});
+
+const MODE_MAP: Record<string, string> = {
+  dating: "dating", hook: "hook",
+  co_travel: "co-travel", night_out: "night-out",
+  club_mates: "club-mates", happening: "happening",
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -49,6 +63,68 @@ async function checkOtpRateLimit(
   return count <= 3;
 }
 
+/**
+ * Create a device session, sign an access token, mark online, and build the
+ * standard auth response. Shared by phone-OTP and Google sign-in.
+ */
+async function issueSession(
+  app: FastifyInstance,
+  reply: FastifyReply,
+  user: { id: string; phone: string | null; createdAt: Date },
+  isNewUser: boolean,
+  device: { deviceId: string; deviceName?: string; platform?: string }
+) {
+  const refreshToken = generateRefreshToken();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+
+  await app.prisma.deviceSession.create({
+    data: {
+      userId: user.id,
+      refreshToken,
+      deviceId: device.deviceId,
+      deviceName: device.deviceName,
+      platform: device.platform,
+      expiresAt,
+    },
+  });
+
+  const accessToken = await reply.jwtSign(
+    { sub: user.id, phone: user.phone ?? undefined },
+    { expiresIn: app.env.JWT_EXPIRES_IN ?? "15m" }
+  );
+
+  await app.redis.set(`vybeon:online:${user.id}`, "1", "EX", 300);
+
+  const profile = await app.prisma.profile.findUnique({ where: { userId: user.id } });
+
+  return {
+    ok: true,
+    accessToken,
+    refreshToken,
+    expiresIn: 900,
+    userId: user.id,
+    isNewUser,
+    user: {
+      id: user.id,
+      phone: user.phone ?? "",
+      name: profile?.name ?? "",
+      age: profile?.age ?? 0,
+      gender: profile?.gender ?? "prefer-not-to-say",
+      bio: profile?.bio ?? undefined,
+      photos: profile?.photos ?? [],
+      interests: profile?.interests ?? [],
+      isVerified: profile?.verified ?? false,
+      isPremium: false,
+      activeMode: MODE_MAP[profile?.mode ?? "happening"] ?? "happening",
+      isOnline: true,
+      lastSeen: new Date().toISOString(),
+      safetyMode: profile?.safetyMode ?? false,
+      privacyLevel: "public",
+      createdAt: user.createdAt.toISOString(),
+    },
+  };
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 const authRoutes: FastifyPluginAsync = async (app) => {
@@ -68,6 +144,17 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     const allowed = await checkOtpRateLimit(app.redis, body.phone);
     if (!allowed) {
       return reply.status(429).send({ error: "Too many OTP requests. Please wait 10 minutes." });
+    }
+
+    // Preferred path: Twilio Verify generates, delivers & tracks the OTP itself.
+    if (isVerifyConfigured(app.env)) {
+      try {
+        await startVerification(app.env, body.phone);
+      } catch (err) {
+        app.log.error({ err }, "Twilio Verify start failed");
+        return reply.status(500).send({ error: "Failed to send OTP. Please try again." });
+      }
+      return reply.send({ ok: true, expiresIn: 600 });
     }
 
     // Invalidate any existing unused OTPs for this phone
@@ -126,6 +213,36 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: "Invalid request body" });
     }
 
+    // Preferred path: verify the code with Twilio Verify.
+    if (isVerifyConfigured(app.env)) {
+      let approved = false;
+      try {
+        approved = await checkVerification(app.env, body.phone, body.code);
+      } catch (err) {
+        app.log.error({ err }, "Twilio Verify check failed");
+        return reply.status(400).send({ error: "Could not verify code. Request a new one." });
+      }
+      if (!approved) {
+        return reply.status(400).send({ error: "Invalid or expired code." });
+      }
+
+      let isNewUser = false;
+      let user = await app.prisma.user.findUnique({ where: { phone: body.phone } });
+      if (!user) {
+        user = await app.prisma.user.create({
+          data: { phone: body.phone, subscription: { create: { plan: "free" } } },
+        });
+        isNewUser = true;
+      }
+
+      const response = await issueSession(app, reply, user, isNewUser, {
+        deviceId: body.deviceId,
+        deviceName: body.deviceName,
+        platform: body.platform,
+      });
+      return reply.send(response);
+    }
+
     // Find the most recent unused OTP for this phone
     const otpRecord = await app.prisma.otpCode.findFirst({
       where: {
@@ -172,65 +289,81 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       isNewUser = true;
     }
 
-    // Issue tokens
-    const refreshToken = generateRefreshToken();
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    // Issue session + tokens
+    const response = await issueSession(app, reply, user, isNewUser, {
+      deviceId: body.deviceId,
+      deviceName: body.deviceName,
+      platform: body.platform,
+    });
+    return reply.send(response);
+  });
 
-    await app.prisma.deviceSession.create({
-      data: {
-        userId: user.id,
-        refreshToken,
-        deviceId: body.deviceId,
-        deviceName: body.deviceName,
-        platform: body.platform,
-        expiresAt,
-      },
+  /**
+   * POST /auth/google
+   * Verify a Google ID token and issue VYBEON tokens (find-or-create by email).
+   */
+  app.post("/auth/google", async (req, reply) => {
+    let body: z.infer<typeof googleBody>;
+    try {
+      body = googleBody.parse(req.body);
+    } catch {
+      return reply.status(400).send({ error: "idToken and deviceId are required" });
+    }
+
+    const audiences = [
+      app.env.GOOGLE_CLIENT_ID_WEB,
+      app.env.GOOGLE_CLIENT_ID_ANDROID,
+      app.env.GOOGLE_CLIENT_ID_IOS,
+    ].filter(Boolean) as string[];
+
+    if (!audiences.length) {
+      return reply.status(503).send({ error: "Google Sign-In is not configured" });
+    }
+
+    // Verify the ID token against Google.
+    let payload: { sub?: string; email?: string; email_verified?: boolean } | undefined;
+    try {
+      const { OAuth2Client } = await import("google-auth-library");
+      const client = new OAuth2Client();
+      const ticket = await client.verifyIdToken({ idToken: body.idToken, audience: audiences });
+      payload = ticket.getPayload();
+    } catch {
+      return reply.status(401).send({ error: "Invalid Google token" });
+    }
+
+    if (!payload?.sub || !payload.email || !payload.email_verified) {
+      return reply.status(401).send({ error: "Google account email not verified" });
+    }
+
+    // Find or create the user by googleId/email.
+    let isNewUser = false;
+    let user = await app.prisma.user.findFirst({
+      where: { OR: [{ googleId: payload.sub }, { email: payload.email }] },
     });
 
-    // Sign access token via @fastify/jwt (sub = userId)
-    const accessToken = await reply.jwtSign(
-      { sub: user.id, phone: user.phone },
-      { expiresIn: app.env.JWT_EXPIRES_IN ?? "15m" }
-    );
+    if (!user) {
+      user = await app.prisma.user.create({
+        data: {
+          email: payload.email,
+          googleId: payload.sub,
+          subscription: { create: { plan: "free" } },
+        },
+      });
+      isNewUser = true;
+    } else if (!user.googleId) {
+      // Link Google to an existing (phone) account sharing the email.
+      user = await app.prisma.user.update({
+        where: { id: user.id },
+        data: { googleId: payload.sub },
+      });
+    }
 
-    // Set user online in Redis
-    await app.redis.set(`vybeon:online:${user.id}`, "1", "EX", 300);
-
-    // Fetch profile for response
-    const profile = await app.prisma.profile.findUnique({ where: { userId: user.id } });
-
-    const modeMap: Record<string, string> = {
-      dating: "dating", hook: "hook",
-      co_travel: "co-travel", night_out: "night-out",
-      club_mates: "club-mates", happening: "happening",
-    };
-
-    return reply.send({
-      ok: true,
-      accessToken,
-      refreshToken,
-      expiresIn: 900,
-      userId: user.id,
-      isNewUser,
-      user: {
-        id: user.id,
-        phone: user.phone,
-        name: profile?.name ?? "",
-        age: profile?.age ?? 0,
-        gender: profile?.gender ?? "prefer-not-to-say",
-        bio: profile?.bio ?? undefined,
-        photos: profile?.photos ?? [],
-        interests: profile?.interests ?? [],
-        isVerified: profile?.verified ?? false,
-        isPremium: false,
-        activeMode: modeMap[profile?.mode ?? "happening"] ?? "happening",
-        isOnline: true,
-        lastSeen: new Date().toISOString(),
-        safetyMode: profile?.safetyMode ?? false,
-        privacyLevel: "public",
-        createdAt: user.createdAt.toISOString(),
-      },
+    const response = await issueSession(app, reply, user, isNewUser, {
+      deviceId: body.deviceId,
+      deviceName: body.deviceName,
+      platform: body.platform,
     });
+    return reply.send(response);
   });
 
   /**
@@ -260,7 +393,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const accessToken = await reply.jwtSign(
-      { sub: session.userId, phone: session.user.phone },
+      { sub: session.userId, phone: session.user.phone ?? undefined },
       { expiresIn: app.env.JWT_EXPIRES_IN ?? "15m" }
     );
 

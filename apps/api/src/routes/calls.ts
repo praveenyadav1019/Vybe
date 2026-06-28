@@ -224,6 +224,39 @@ const callsRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /**
+   * GET /calls/:id/agora-token
+   * Return Agora join credentials for a participant. Token is signed with
+   * uid 0 (valid for any uid), so either party can join the channel.
+   */
+  app.get("/calls/:id/agora-token", { preHandler: [app.authenticate] }, async (req, reply) => {
+    const userId = requireUserId(req);
+    const callId = z.string().min(1).parse((req.params as { id: string }).id);
+
+    const call = await app.prisma.callSession.findFirst({
+      where: { id: callId, users: { some: { id: userId } } },
+    });
+    if (!call || !call.channelName) {
+      return reply.status(404).send({ error: "Call not found" });
+    }
+
+    const token = await generateAgoraToken(
+      app.env.AGORA_APP_ID,
+      app.env.AGORA_APP_CERTIFICATE,
+      call.channelName,
+      0, // uid 0 → token usable by any uid
+      1, // RtcRole.PUBLISHER
+      3600
+    );
+
+    return {
+      ok: true,
+      appId: app.env.AGORA_APP_ID ?? null,
+      channelName: call.channelName,
+      token,
+    };
+  });
+
+  /**
    * POST /calls/:id/reject
    * Reject an incoming call.
    */

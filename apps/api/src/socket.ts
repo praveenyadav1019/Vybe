@@ -1,6 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import type { FastifyInstance } from "fastify";
 import jwt from "jsonwebtoken";
+import { notifyIfOffline } from "./lib/push.js";
 
 // ─── Stranger Chat Types ──────────────────────────────────────────────────────
 
@@ -428,6 +429,21 @@ export function attachSocketIO(io: Server, app: FastifyInstance): void {
           for (const u of chat.users) {
             io.to(`user:${u.id}`).emit("message:new", msgDto);
           }
+
+          // Push-notify recipients who are offline
+          const senderProfile = await app.prisma.profile.findUnique({
+            where: { userId },
+            select: { name: true },
+          });
+          for (const u of chat.users) {
+            if (u.id !== userId) {
+              void notifyIfOffline(app, u.id, {
+                title: senderProfile?.name ?? "New message",
+                body: payload.content.trim().slice(0, 120),
+                data: { type: "message", chatId: payload.chatId },
+              });
+            }
+          }
         } catch (e) {
           app.log.error(e, "message:send handler failed");
         }
@@ -584,6 +600,13 @@ export function attachSocketIO(io: Server, app: FastifyInstance): void {
           fromUserId: userId,
           fromName: profile?.name ?? "Someone",
           fromPhoto: profile?.photos[0] ?? null,
+        });
+
+        // Push-notify the target if they're offline
+        void notifyIfOffline(app, payload.targetUserId, {
+          title: `${profile?.name ?? "Someone"} pinged you 💜`,
+          body: "Tap to see who's nearby",
+          data: { type: "ping", fromUserId: userId },
         });
       } catch (e) {
         app.log.error(e, "radar:ping failed");

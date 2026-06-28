@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import * as SecureStore from "expo-secure-store";
 import type { AppMode } from "../types";
+import { deleteStoredValue, getStoredValue, setStoredValue } from "../lib/api";
 
 const ONBOARDING_KEY = "vybeon_onboarding_complete";
 
@@ -40,16 +40,16 @@ export const useUserStore = create<UserState>((set, get) => ({
       profile: { ...defaultProfile, ...get().profile, ...p },
     }),
   resetProfile: async () => {
-    await SecureStore.deleteItemAsync(ONBOARDING_KEY).catch(() => undefined);
+    await deleteStoredValue(ONBOARDING_KEY).catch(() => undefined);
     set({ profile: null, onboardingComplete: false, onboardingHydrated: true });
   },
   finishOnboarding: async () => {
-    await SecureStore.setItemAsync(ONBOARDING_KEY, "1");
+    await setStoredValue(ONBOARDING_KEY, "1");
     set({ onboardingComplete: true, onboardingHydrated: true });
   },
   hydrateOnboarding: async () => {
     try {
-      const v = await SecureStore.getItemAsync(ONBOARDING_KEY);
+      const v = await getStoredValue(ONBOARDING_KEY);
       set({ onboardingComplete: v === "1", onboardingHydrated: true });
     } catch {
       set({ onboardingHydrated: true });

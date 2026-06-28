@@ -36,7 +36,7 @@ export function Button({
   const isDisabled = disabled || loading;
 
   const inner = loading ? (
-    <ActivityIndicator color={variant === 'primary' ? colors.text : colors.primary} />
+    <ActivityIndicator color={variant === 'primary' || variant === 'danger' ? '#FFFFFF' : colors.primary} />
   ) : (
     <Text
       style={[
@@ -52,7 +52,7 @@ export function Button({
     </Text>
   );
 
-  if ((variant === 'primary' || gradient) && !isDisabled) {
+  if (gradient && !isDisabled) {
     return (
       <Pressable
         accessibilityRole="button"
@@ -61,7 +61,7 @@ export function Button({
         style={({ pressed }) => [pressed && styles.pressed, style]}
       >
         <LinearGradient
-          colors={['#7C3AED', '#5B21B6']}
+          colors={['#7C3AED', '#6D28D9']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
           style={styles.base}
@@ -95,19 +95,14 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: 54,
+    minHeight: 52,
     paddingHorizontal: 20,
-    borderRadius: 16,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   primary: {
     backgroundColor: colors.primary,
-    shadowColor: colors.primary,
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
   },
   outline: {
     borderWidth: 1,
@@ -119,15 +114,9 @@ const styles = StyleSheet.create({
   },
   danger: {
     backgroundColor: colors.danger,
-    shadowColor: colors.danger,
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 5,
   },
   pressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.98 }],
+    opacity: 0.85,
   },
   disabled: {
     opacity: 0.4,
@@ -137,8 +126,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.3,
   },
-  textPrimary: { color: colors.text },
+  textPrimary: { color: '#FFFFFF' },
   textOutline: { color: colors.text },
-  textGhost: { color: colors.accent },
-  textDanger: { color: colors.text },
+  textGhost: { color: colors.primary },
+  textDanger: { color: '#FFFFFF' },
 });

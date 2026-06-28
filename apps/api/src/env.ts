@@ -25,17 +25,26 @@ const schema = z.object({
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_PHONE_NUMBER: z.string().optional(),
+  // Twilio Verify (preferred for OTP) + Messaging Service
+  TWILIO_VERIFY_SERVICE_SID: z.string().optional(),
+  TWILIO_MESSAGING_SERVICE_SID: z.string().optional(),
 
   // Agora – optional; placeholder token used when cert is absent
   AGORA_APP_ID: z.string().optional(),
   AGORA_APP_CERTIFICATE: z.string().optional(),
 
-  // Storage
+  // Storage (S3 or Cloudflare R2 — R2 needs STORAGE_ENDPOINT set)
   STORAGE_CDN_URL: z.string().default("https://cdn.vybeon.com"),
   STORAGE_BUCKET: z.string().default("vybeon-media"),
   STORAGE_REGION: z.string().default("us-east-1"),
+  STORAGE_ENDPOINT: z.string().optional(),
   STORAGE_ACCESS_KEY: z.string().optional(),
   STORAGE_SECRET_KEY: z.string().optional(),
+
+  // Google OAuth (Sign-In) — verify ID tokens issued to these client IDs
+  GOOGLE_CLIENT_ID_WEB: z.string().optional(),
+  GOOGLE_CLIENT_ID_ANDROID: z.string().optional(),
+  GOOGLE_CLIENT_ID_IOS: z.string().optional(),
 
   // Google Places
   GOOGLE_PLACES_API_KEY: z.string().optional(),

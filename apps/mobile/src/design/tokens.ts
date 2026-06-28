@@ -55,6 +55,14 @@ export const palette = {
   warning: '#F59E0B',
   error:   '#EF4444',
   info:    '#3B82F6',
+
+  // Bold & playful brights
+  pink:   '#FF2D78',
+  coral:  '#FF6B3D',
+  cyan:   '#00E0C6',
+  yellow: '#FFD23F',
+  lime:   '#A3E635',
+  blue:   '#2563EB',
 } as const;
 
 
@@ -128,6 +136,19 @@ export const C = {
   overlayDark:   'rgba(0,0,0,0.55)',
   overlayLight:  'rgba(255,255,255,0.9)',
   overlayBrand:  'rgba(124,58,237,0.12)',
+} as const;
+
+
+// ─── Gradients (bold & playful) ────────────────────────────────────────────────
+
+export const G = {
+  vybe:    ['#7C3AED', '#FF2D78'] as const,   // signature violet → hot pink
+  sunset:  ['#FF6B3D', '#FF2D78'] as const,   // coral → pink
+  ocean:   ['#00E0C6', '#2563EB'] as const,   // cyan → blue
+  candy:   ['#A855F7', '#EC4899'] as const,   // purple → pink
+  lime:    ['#A3E635', '#00E0C6'] as const,   // lime → cyan
+  sunrise: ['#FFD23F', '#FF6B3D'] as const,   // yellow → coral
+  brand:   ['#9333EA', '#C084FC'] as const,   // logo gradient
 } as const;
 
 

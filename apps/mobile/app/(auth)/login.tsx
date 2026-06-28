@@ -19,7 +19,7 @@
  * "Create Account" → /(auth)/onboarding
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -45,8 +45,13 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
 import { apiFetch } from '@/lib/api';
+import { useAuthStore } from '@/stores/authStore';
 import { C, T, S, R, SH, ANIM, DIM } from '@/design/tokens';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const { width, height } = Dimensions.get('window');
 
@@ -151,6 +156,47 @@ export default function AuthWelcomeScreen() {
   const handleCreateAcct = () => router.push('/(auth)/onboarding');
   const handleSocial     = () => openPhonePanel();
 
+  // ── Google Sign-In ──────────────────────────────────────────────────────────
+  const login = useAuthStore((s) => s.login);
+  const [, googleResponse, googlePrompt] = Google.useIdTokenAuthRequest({
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_ANDROID,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS,
+  });
+
+  async function finishGoogle(idToken: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch<{ accessToken: string; refreshToken: string; user: any; isNewUser?: boolean }>(
+        '/auth/google',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            idToken,
+            deviceId: `expo-google-${Platform.OS}-001`,
+            platform: Platform.OS,
+          }),
+        }
+      );
+      await login(res.accessToken, res.refreshToken, res.user);
+      router.replace(res.isNewUser ? '/(auth)/profile-setup' : '/(tabs)/home');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Google sign-in failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (googleResponse?.type === 'success' && googleResponse.params?.id_token) {
+      void finishGoogle(googleResponse.params.id_token);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [googleResponse]);
+
+  const handleGoogle = () => { void googlePrompt(); };
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView
@@ -158,14 +204,14 @@ export default function AuthWelcomeScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="dark-content" />
 
-      {/* ── HERO: gradient simulating nightlife photo ─────────────────────── */}
+      {/* ── HERO: soft light gradient ─────────────────────────────────────── */}
       <View style={[s.hero, { paddingTop: insets.top }]}>
         {/* Background gradient layers */}
         <LinearGradient
-          colors={['#1A0A35', '#3B1A75', '#7B3FAF', 'rgba(245,240,255,0)']}
-          locations={[0, 0.38, 0.72, 1]}
+          colors={['#F6F2FF', '#EFEAFF', '#F8F6FF', '#FFFFFF']}
+          locations={[0, 0.4, 0.75, 1]}
           style={StyleSheet.absoluteFillObject}
         />
 
@@ -266,7 +312,7 @@ export default function AuthWelcomeScreen() {
           activeOpacity={0.86}
         >
           <LinearGradient
-            colors={['#D4A853', '#C9A84C']}
+            colors={['#7C3AED', '#6D28D9']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={s.btnGoldInner}
@@ -290,7 +336,7 @@ export default function AuthWelcomeScreen() {
           </SocialBtn>
 
           {/* Google */}
-          <SocialBtn onPress={handleSocial}>
+          <SocialBtn onPress={handleGoogle}>
             <Text style={ss.googleG}>G</Text>
           </SocialBtn>
         </View>
@@ -343,13 +389,13 @@ const s = StyleSheet.create({
   brandText: {
     fontSize: T.size['2xl'],
     fontWeight: T.weight.black,
-    color: '#FFFFFF',
+    color: C.textPrimary,
     letterSpacing: T.tracking.widest,
   },
   brandSub: {
     fontSize: T.size.sm,
     fontWeight: T.weight.regular,
-    color: 'rgba(255,255,255,0.65)',
+    color: C.textSecondary,
     marginTop: 4,
     letterSpacing: 0.4,
   },
@@ -458,7 +504,7 @@ const s = StyleSheet.create({
     borderRadius: R.button,
     overflow: 'hidden',
     marginBottom: S[5],
-    ...SH.gold,
+    ...SH.brand,
   },
   btnGoldInner: {
     flex: 1,

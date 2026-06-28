@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
-import * as SecureStore from 'expo-secure-store';
 import { TOKEN_KEYS } from './api';
+import { getStoredValue } from './api';
 
 const SOCKET_URL =
   process.env.EXPO_PUBLIC_SOCKET_URL ?? 'http://localhost:4000';
@@ -12,7 +12,7 @@ class SocketClient {
   async connect(): Promise<void> {
     if (this.socket?.connected) return;
 
-    const token = await SecureStore.getItemAsync(TOKEN_KEYS.ACCESS);
+    const token = await getStoredValue(TOKEN_KEYS.ACCESS);
     if (!token) throw new Error('No auth token');
 
     this.socket = io(SOCKET_URL, {

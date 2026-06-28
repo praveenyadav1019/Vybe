@@ -28,32 +28,11 @@ import { BlurView } from 'expo-blur';
 import { colors } from '@/theme/colors';
 import { socketClient } from '@/lib/socket';
 import { api } from '@/lib/api';
+import { useAgoraCall } from '@/lib/agora/useAgoraCall';
+import { AgoraVideoView } from '@/lib/agora/AgoraVideoView';
 
-/*
- * TODO: Agora RTC Integration
- *
- * When integrating Agora:
- *   import { createAgoraRtcEngine, RtcSurfaceView, ClientRoleType, ChannelProfileType } from 'react-native-agora';
- *
- *   const engine = await createAgoraRtcEngine();
- *   engine.initialize({
- *     appId: process.env.EXPO_PUBLIC_AGORA_APP_ID,
- *     channelProfile: ChannelProfileType.ChannelProfileCommunication,
- *   });
- *   engine.enableVideo();
- *   engine.enableAudio();
- *   await engine.joinChannel(agoraToken, channelName, uid, {
- *     clientRoleType: ClientRoleType.ClientRoleBroadcaster,
- *   });
- *
- * Replace RemoteVideoPlaceholder and LocalVideoPlaceholder with:
- *   <RtcSurfaceView canvas={{ uid: remoteUid }} style={styles.remoteVideo} />
- *   <RtcSurfaceView canvas={{ uid: 0 }} style={styles.localVideo} />  // 0 = local
- *
- * Listen for:
- *   engine.addListener('onUserJoined', (connection, uid) => { setRemoteUid(uid); });
- *   engine.addListener('onUserOffline', () => { setRemoteUid(null); });
- */
+// Agora RTC is wired via `@/lib/agora/useAgoraCall` (native engine) +
+// `@/lib/agora/AgoraVideoView` (RtcSurfaceView). Both are no-ops on web/Expo Go.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type CallState = 'ringing' | 'connecting' | 'active' | 'ended';
@@ -324,6 +303,20 @@ export default function VideoCallScreen() {
   const timer = useCallTimer(callState === 'active');
   const durationSecRef = useRef(0);
 
+  // ── Agora RTC engine (native only; no-op on web/Expo Go) ──────────────────
+  const agora = useAgoraCall({
+    callId,
+    active: callState === 'connecting' || callState === 'active',
+    video: true,
+  });
+
+  const handleToggleMute = useCallback(() => {
+    setIsMuted((m) => { agora.setMuted(!m); return !m; });
+  }, [agora]);
+  const handleToggleCamera = useCallback(() => {
+    setIsCameraOff((c) => { agora.setCameraOff(!c); return !c; });
+  }, [agora]);
+
   // Auto-hide controls after 4 seconds of inactivity
   const resetControlsTimer = useCallback(() => {
     setShowControls(true);
@@ -380,6 +373,7 @@ export default function VideoCallScreen() {
   const endCall = useCallback(
     async (emitEnd = true) => {
       setCallState('ended');
+      agora.leave();
       if (emitEnd) {
         socketClient.emit('call:end', { callId });
         if (callId) {
@@ -422,8 +416,8 @@ export default function VideoCallScreen() {
 
   const handleFlipCamera = useCallback(() => {
     setIsFrontCamera((prev) => !prev);
-    // TODO: engine.switchCamera() when Agora is integrated
-  }, []);
+    agora.switchCamera();
+  }, [agora]);
 
   // ── Not verified gate ────────────────────────────────────────────────────
   if (!bothVerified) {
@@ -445,10 +439,14 @@ export default function VideoCallScreen() {
         onPress={resetControlsTimer}
         style={StyleSheet.absoluteFill}
       >
-        <RemoteVideoPlaceholder name={name} callState={callState} />
+        {agora.remoteUid != null ? (
+          <AgoraVideoView uid={agora.remoteUid} style={StyleSheet.absoluteFillObject} />
+        ) : (
+          <RemoteVideoPlaceholder name={name} callState={callState} />
+        )}
       </TouchableOpacity>
 
-      {/* Local video (draggable preview) */}
+      {/* Local video (preview) */}
       {callState === 'active' && !isCameraOff && (
         <View
           style={[
@@ -456,7 +454,11 @@ export default function VideoCallScreen() {
             { top: insets.top + 80, right: 16 },
           ]}
         >
-          <LocalVideoPlaceholder />
+          <AgoraVideoView
+            uid={0}
+            style={StyleSheet.absoluteFillObject}
+            fallback={<LocalVideoPlaceholder />}
+          />
         </View>
       )}
 
@@ -505,8 +507,8 @@ export default function VideoCallScreen() {
                 callState={callState}
                 isMuted={isMuted}
                 isCameraOff={isCameraOff}
-                onToggleMute={() => setIsMuted((m) => !m)}
-                onToggleCamera={() => setIsCameraOff((c) => !c)}
+                onToggleMute={handleToggleMute}
+                onToggleCamera={handleToggleCamera}
                 onFlipCamera={handleFlipCamera}
                 onEndCall={() => endCall(true)}
                 onChat={() => setShowChat((s) => !s)}
@@ -521,8 +523,8 @@ export default function VideoCallScreen() {
                 callState={callState}
                 isMuted={isMuted}
                 isCameraOff={isCameraOff}
-                onToggleMute={() => setIsMuted((m) => !m)}
-                onToggleCamera={() => setIsCameraOff((c) => !c)}
+                onToggleMute={handleToggleMute}
+                onToggleCamera={handleToggleCamera}
                 onFlipCamera={handleFlipCamera}
                 onEndCall={() => endCall(true)}
                 onChat={() => setShowChat((s) => !s)}

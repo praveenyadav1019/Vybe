@@ -26,25 +26,15 @@ const success  = '#10B981';
 const ACTIONS = [
   { icon: 'settings-outline' as const,   label: 'Settings',    route: '/(app)/settings/index' },
   { icon: 'people-outline' as const,     label: 'Connections', route: '/(app)/connections'    },
-  { icon: 'home-outline' as const,       label: 'My Parties',  route: '/(app)/parties/index'  },
   { icon: 'qr-code-outline' as const,    label: 'QR Code',     route: '/(app)/qr'             },
 ] as const;
 
 // ─── Menu items ───────────────────────────────────────────────────────────────
 const MENU_ITEMS = [
-  { icon: 'business-outline' as const,     label: 'Saved Venues',   route: '/(app)/places'   },
-  { icon: 'calendar-outline' as const,     label: 'My Events',      route: '/(app)/events'   },
   { icon: 'shield-outline' as const,       label: 'Safety Center',  route: '/(app)/safety'   },
   { icon: 'star-outline' as const,         label: 'Premium',        route: '/(app)/premium'  },
   { icon: 'help-circle-outline' as const,  label: 'Help & Support', route: '/(app)/help'     },
 ] as const;
-
-// ─── Mode labels ──────────────────────────────────────────────────────────────
-const MODE_LABEL: Record<string, string> = {
-  dating: 'Dating Mode', hook: 'Hook Up',
-  'co-travel': 'Co-Travel', 'night-out': 'Night Out',
-  'club-mates': 'Club Mates', casual: 'Just Vibing',
-};
 
 // ─── Stat tile ────────────────────────────────────────────────────────────────
 function StatTile({ icon, value, label, color = brand }: { icon: string; value: string | number; label: string; color?: string }) {
@@ -66,20 +56,15 @@ export default function ProfileTabScreen() {
   const logout = useAuthStore((s) => s.logout);
 
   const [connectionCount, setConnectionCount] = useState<number | null>(null);
-  const [partiesAttended, setPartiesAttended] = useState<number | null>(null);
 
   useEffect(() => {
     api.get<{ connections: unknown[] }>('/connections').then((r) => {
       setConnectionCount(r.data.connections.length);
     }).catch(() => {});
-    api.get<{ parties: unknown[] }>('/parties/attending').then((r) => {
-      setPartiesAttended(r.data.parties.length);
-    }).catch(() => {});
   }, []);
 
   const name      = user?.name ?? 'You';
   const age       = user?.age ?? '';
-  const mode      = user?.activeMode ?? 'casual';
   const photo     = user?.photos?.[0];
   const isPremium = user?.isPremium ?? false;
   const isOnline  = user?.isOnline ?? true;
@@ -125,11 +110,6 @@ export default function ProfileTabScreen() {
 
           <Text style={styles.nameText}>{name}{age ? `, ${age}` : ''}</Text>
 
-          {/* Mode badge */}
-          <View style={styles.modeBadge}>
-            <Text style={styles.modeBadgeText}>{MODE_LABEL[mode] ?? mode}</Text>
-          </View>
-
           {/* Verified + premium badges */}
           <View style={styles.badgeRow}>
             {user?.isVerified && (
@@ -164,12 +144,6 @@ export default function ProfileTabScreen() {
             value={connectionCount ?? '—'}
             label="Connections"
             color="#7C3AED"
-          />
-          <StatTile
-            icon="home-outline"
-            value={partiesAttended ?? '—'}
-            label="Parties"
-            color="#0284C7"
           />
           <StatTile
             icon="location-outline"

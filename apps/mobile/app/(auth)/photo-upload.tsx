@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { uploadPhoto } from '@/lib/uploadPhoto';
 
 const { width: W } = Dimensions.get('window');
 const GRID_GAP = 10;
@@ -118,9 +119,16 @@ export default function PhotoUploadScreen() {
       quality: 0.85,
     });
     if (!result.canceled && result.assets[0]) {
-      const next = [...photos];
-      next[index] = result.assets[0].uri;
-      setPhotos(next);
+      const asset = result.assets[0];
+      // Optimistic local preview while the upload runs.
+      setPhotos((cur) => { const n = [...cur]; n[index] = asset.uri; return n; });
+      try {
+        const cdnUrl = await uploadPhoto(asset.uri, asset.mimeType ?? 'image/jpeg');
+        setPhotos((cur) => { const n = [...cur]; n[index] = cdnUrl; return n; });
+      } catch {
+        setPhotos((cur) => { const n = [...cur]; n[index] = null; return n; });
+        Alert.alert('Upload failed', 'Could not upload that photo. Please try again.');
+      }
     }
   }
 

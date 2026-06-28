@@ -25,6 +25,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors } from '@/theme/colors';
 import { socketClient } from '@/lib/socket';
 import { api } from '@/lib/api';
+import { useAgoraCall } from '@/lib/agora/useAgoraCall';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type CallState = 'ringing' | 'connecting' | 'active' | 'ended';
@@ -225,6 +226,13 @@ export default function AudioCallScreen() {
   const name = callerName ?? 'Unknown';
   const incomingCall = isIncoming === 'true';
 
+  // ── Agora RTC engine (native only; no-op on web/Expo Go) ──────────────────
+  const agora = useAgoraCall({
+    callId,
+    active: callState === 'connecting' || callState === 'active',
+    video: false,
+  });
+
   // Status text
   const statusText = {
     ringing: incomingCall ? 'Incoming call...' : 'Calling...',
@@ -291,6 +299,7 @@ export default function AudioCallScreen() {
   const endCall = useCallback(
     async (emitEnd = true) => {
       Vibration.cancel();
+      agora.leave();
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
       }
@@ -347,14 +356,12 @@ export default function AudioCallScreen() {
   }, [callId, router]);
 
   const handleToggleMute = useCallback(() => {
-    setIsMuted((m) => !m);
-    // TODO: actual mute via WebRTC/Agora SDK
-  }, []);
+    setIsMuted((m) => { agora.setMuted(!m); return !m; });
+  }, [agora]);
 
   const handleToggleSpeaker = useCallback(() => {
-    setIsSpeaker((s) => !s);
-    // TODO: actual speaker toggle via native audio API
-  }, []);
+    setIsSpeaker((s) => { agora.setSpeaker(!s); return !s; });
+  }, [agora]);
 
   const isRinging = callState === 'ringing' || callState === 'connecting';
 

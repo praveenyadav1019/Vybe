@@ -5,6 +5,36 @@ import axios, {
 } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
+function hasLocalStorage() {
+  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+}
+
+export async function getStoredValue(key: string): Promise<string | null> {
+  if (hasLocalStorage()) {
+    return window.localStorage.getItem(key);
+  }
+
+  return SecureStore.getItemAsync(key);
+}
+
+export async function setStoredValue(key: string, value: string): Promise<void> {
+  if (hasLocalStorage()) {
+    window.localStorage.setItem(key, value);
+    return;
+  }
+
+  await SecureStore.setItemAsync(key, value);
+}
+
+export async function deleteStoredValue(key: string): Promise<void> {
+  if (hasLocalStorage()) {
+    window.localStorage.removeItem(key);
+    return;
+  }
+
+  await SecureStore.deleteItemAsync(key);
+}
+
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
@@ -34,7 +64,7 @@ class ApiClient {
     // Request: attach access token
     this.client.interceptors.request.use(
       async (config: InternalAxiosRequestConfig) => {
-        const token = await SecureStore.getItemAsync(TOKEN_KEYS.ACCESS);
+        const token = await getStoredValue(TOKEN_KEYS.ACCESS);
         if (token) config.headers.Authorization = `Bearer ${token}`;
         return config;
       },
@@ -63,9 +93,7 @@ class ApiClient {
           this.isRefreshing = true;
 
           try {
-            const refreshToken = await SecureStore.getItemAsync(
-              TOKEN_KEYS.REFRESH
-            );
+            const refreshToken = await getStoredValue(TOKEN_KEYS.REFRESH);
             if (!refreshToken) throw new Error('No refresh token');
 
             const { data } = await axios.post(
@@ -74,7 +102,7 @@ class ApiClient {
             );
             const newToken = data.accessToken as string;
 
-            await SecureStore.setItemAsync(TOKEN_KEYS.ACCESS, newToken);
+            await setStoredValue(TOKEN_KEYS.ACCESS, newToken);
             this.refreshSubscribers.forEach((cb) => cb(newToken));
             this.refreshSubscribers = [];
 
@@ -95,21 +123,21 @@ class ApiClient {
 
   async saveTokens(accessToken: string, refreshToken: string) {
     await Promise.all([
-      SecureStore.setItemAsync(TOKEN_KEYS.ACCESS, accessToken),
-      SecureStore.setItemAsync(TOKEN_KEYS.REFRESH, refreshToken),
+      setStoredValue(TOKEN_KEYS.ACCESS, accessToken),
+      setStoredValue(TOKEN_KEYS.REFRESH, refreshToken),
     ]);
   }
 
   async clearTokens() {
     await Promise.all([
-      SecureStore.deleteItemAsync(TOKEN_KEYS.ACCESS),
-      SecureStore.deleteItemAsync(TOKEN_KEYS.REFRESH),
-      SecureStore.deleteItemAsync(TOKEN_KEYS.USER_ID),
+      deleteStoredValue(TOKEN_KEYS.ACCESS),
+      deleteStoredValue(TOKEN_KEYS.REFRESH),
+      deleteStoredValue(TOKEN_KEYS.USER_ID),
     ]);
   }
 
   async getAccessToken(): Promise<string | null> {
-    return SecureStore.getItemAsync(TOKEN_KEYS.ACCESS);
+    return getStoredValue(TOKEN_KEYS.ACCESS);
   }
 
   get<T>(url: string, params?: object) {

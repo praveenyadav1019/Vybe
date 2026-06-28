@@ -99,11 +99,9 @@ const connectionsRoutes: FastifyPluginAsync = async (app) => {
       },
       include: {
         userA: {
-          where: { isOnline: true },
           include: { profile: { select: { name: true, photos: true, verified: true, mode: true } } },
         },
         userB: {
-          where: { isOnline: true },
           include: { profile: { select: { name: true, photos: true, verified: true, mode: true } } },
         },
       },

@@ -86,7 +86,9 @@ enum ConnectionType {
 
 model User {
   id        String   @id @default(cuid())
-  phone     String   @unique
+  phone     String?  @unique
+  email     String?  @unique
+  googleId  String?  @unique
   pushToken String?
   isOnline  Boolean  @default(false)
   lastSeen  DateTime @default(now())
