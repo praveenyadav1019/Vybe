@@ -6,6 +6,8 @@ import { requireUserId } from "../lib/auth.js";
 
 const pingBody = z.object({
   message: z.string().max(200).optional(),
+  /** Super-like: highlights the like to the recipient. */
+  superlike: z.boolean().optional(),
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -27,6 +29,30 @@ async function getOrCreateDm(app: FastifyInstance, a: string, b: string) {
   });
 }
 
+/**
+ * Record a mutual match: ensure a DM chat and a `matched` Connection exist
+ * (idempotent). The Connection is stored with a canonical (sorted) user order
+ * to satisfy the `@@unique([userAId, userBId])` constraint. Returns the chat.
+ */
+async function createMatchConnection(app: FastifyInstance, a: string, b: string) {
+  const chat = await getOrCreateDm(app, a, b);
+  const existing = await app.prisma.connection.findFirst({
+    where: {
+      OR: [
+        { userAId: a, userBId: b },
+        { userAId: b, userBId: a },
+      ],
+    },
+  });
+  if (!existing) {
+    const [x, y] = [a, b].sort();
+    await app.prisma.connection
+      .create({ data: { userAId: x, userBId: y, type: "matched" } })
+      .catch(() => {/* unique race — already created */});
+  }
+  return chat;
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 const discoveryRoutes: FastifyPluginAsync = async (app) => {
@@ -42,41 +68,52 @@ const discoveryRoutes: FastifyPluginAsync = async (app) => {
     const limit = Math.min(50, Math.max(1, parseInt(query.limit ?? "20", 10)));
     const skip = (page - 1) * limit;
 
+    // Distance ranking via Redis GEO (if the viewer has shared a location).
     const myLocation = await app.prisma.userLocation.findUnique({ where: { userId } });
-    if (!myLocation) return { items: [], total: 0, page, limit, hasMore: false };
+    const hits = myLocation
+      ? await app.geo.nearby(myLocation.lng, myLocation.lat, 2000, userId)
+      : [];
+    const distanceById = new Map(hits.map((h) => [h.userId, h.distanceM]));
 
-    // Nearby within 2 km
-    const hits = await app.geo.nearby(myLocation.lng, myLocation.lat, 2000, userId);
-    if (!hits.length) return { items: [], total: 0, page, limit, hasMore: false };
-
-    const nearbyIds = hits.map((h) => h.userId);
-
-    // Fetch blocks
+    // People you've already liked/matched or been matched with — hide them.
+    const [requests, connections] = await Promise.all([
+      app.prisma.matchRequest.findMany({
+        where: { OR: [{ fromUserId: userId }, { toUserId: userId }] },
+        select: { fromUserId: true, toUserId: true },
+      }),
+      app.prisma.connection.findMany({
+        where: { OR: [{ userAId: userId }, { userBId: userId }] },
+        select: { userAId: true, userBId: true },
+      }),
+    ]);
     const blocks = await app.prisma.block.findMany({
-      where: {
-        OR: [
-          { blockerId: userId, blockedId: { in: nearbyIds } },
-          { blockedId: userId, blockerId: { in: nearbyIds } },
-        ],
-      },
+      where: { OR: [{ blockerId: userId }, { blockedId: userId }] },
+      select: { blockerId: true, blockedId: true },
     });
-    const blockedSet = new Set(blocks.flatMap((b) => [b.blockerId, b.blockedId]));
-    blockedSet.delete(userId);
+    const excluded = new Set<string>([userId]);
+    for (const r of requests) { excluded.add(r.fromUserId); excluded.add(r.toUserId); }
+    for (const c of connections) { excluded.add(c.userAId); excluded.add(c.userBId); }
+    for (const b of blocks) { excluded.add(b.blockerId); excluded.add(b.blockedId); }
 
-    // Fetch users with profiles
+    // Candidates: nearby first; fall back to all registered people with a
+    // profile so the deck still works before geo data exists (early stage).
+    const nearbyIds = hits.map((h) => h.userId).filter((id) => !excluded.has(id));
     const users = await app.prisma.user.findMany({
-      where: {
-        id: { in: nearbyIds.filter((id) => !blockedSet.has(id)) },
-      },
+      where: nearbyIds.length
+        ? { id: { in: nearbyIds } }
+        : { id: { notIn: Array.from(excluded) }, profile: { isNot: null } },
       include: { profile: true },
       orderBy: [{ isOnline: "desc" }, { lastSeen: "desc" }],
     });
+
+    // Nearby candidates first (by distance), then the rest.
+    users.sort((a, b) => (distanceById.get(a.id) ?? 1e12) - (distanceById.get(b.id) ?? 1e12));
 
     const total = users.length;
     const paginated = users.slice(skip, skip + limit);
 
     const items = paginated.map((u) => {
-      const hit = hits.find((h) => h.userId === u.id);
+      const distM = distanceById.get(u.id);
       return {
         id: u.id,
         name: u.profile?.name ?? "Unknown",
@@ -87,7 +124,7 @@ const discoveryRoutes: FastifyPluginAsync = async (app) => {
         verified: u.profile?.verified ?? false,
         mode: u.profile?.mode ?? "happening",
         isOnline: u.isOnline,
-        distanceBucket: hit ? app.geo.bucketForDistance(hit.distanceM) : "nearby",
+        distanceBucket: distM != null ? app.geo.bucketForDistance(distM) : "Nearby",
       };
     });
 
@@ -132,20 +169,6 @@ const discoveryRoutes: FastifyPluginAsync = async (app) => {
     });
     if (block) return reply.status(403).send({ error: "Cannot ping this user" });
 
-    // Check for existing pending/accepted request
-    const existing = await app.prisma.matchRequest.findFirst({
-      where: {
-        OR: [
-          { fromUserId: fromId, toUserId: toId },
-          { fromUserId: toId, toUserId: fromId },
-        ],
-        status: { in: ["pending", "accepted"] },
-      },
-    });
-    if (existing) {
-      return reply.status(409).send({ error: "A ping or match already exists with this user" });
-    }
-
     let body: z.infer<typeof pingBody> = {};
     try {
       body = pingBody.parse(req.body ?? {});
@@ -155,6 +178,54 @@ const discoveryRoutes: FastifyPluginAsync = async (app) => {
 
     const fromProfile = await app.prisma.profile.findUnique({ where: { userId: fromId } });
 
+    // Reciprocal like → instant match (they already liked you).
+    const reciprocal = await app.prisma.matchRequest.findFirst({
+      where: { fromUserId: toId, toUserId: fromId, status: "pending" },
+    });
+    if (reciprocal) {
+      await app.prisma.matchRequest.update({
+        where: { id: reciprocal.id },
+        data: { status: "accepted" },
+      });
+      const chat = await createMatchConnection(app, fromId, toId);
+      const toProfile = await app.prisma.profile.findUnique({ where: { userId: toId } });
+
+      // Notify both sides it's a match.
+      app.io?.to(`user:${toId}`).emit("match:new", {
+        userId: fromId,
+        name: fromProfile?.name,
+        photo: fromProfile?.photos[0],
+        chatId: chat.id,
+      });
+      await app.prisma.notification.create({
+        data: {
+          userId: toId,
+          type: "match_accepted",
+          title: "It's a match! 🎉",
+          body: `You matched with ${fromProfile?.name ?? "someone"}`,
+          data: { chatId: chat.id, userId: fromId },
+        },
+      });
+      return { ok: true, matched: true, chatId: chat.id, user: {
+        id: toId, name: toProfile?.name, photo: toProfile?.photos[0],
+      } };
+    }
+
+    // Already liked them / already matched?
+    const outgoing = await app.prisma.matchRequest.findFirst({
+      where: {
+        OR: [
+          { fromUserId: fromId, toUserId: toId },
+          { fromUserId: toId, toUserId: fromId },
+        ],
+        status: { in: ["pending", "accepted"] },
+      },
+    });
+    if (outgoing) {
+      return reply.status(409).send({ error: "A like or match already exists with this user" });
+    }
+
+    // One-sided like → create a pending request.
     const ping = await app.prisma.matchRequest.create({
       data: {
         fromUserId: fromId,
@@ -164,14 +235,16 @@ const discoveryRoutes: FastifyPluginAsync = async (app) => {
       },
     });
 
-    // Create in-app notification
+    // Create in-app notification (super-likes read differently).
     await app.prisma.notification.create({
       data: {
         userId: toId,
         type: "match_request",
-        title: "New ping!",
-        body: `${fromProfile?.name ?? "Someone"} sent you a ping`,
-        data: { pingId: ping.id, fromUserId: fromId },
+        title: body.superlike ? "You've been super-liked! ⭐" : "Someone likes you!",
+        body: body.superlike
+          ? `${fromProfile?.name ?? "Someone"} super-liked you`
+          : `${fromProfile?.name ?? "Someone"} liked your profile`,
+        data: { pingId: ping.id, fromUserId: fromId, superlike: !!body.superlike },
       },
     });
 
@@ -182,9 +255,10 @@ const discoveryRoutes: FastifyPluginAsync = async (app) => {
       fromName: fromProfile?.name,
       fromPhoto: fromProfile?.photos[0],
       message: body.message,
+      superlike: !!body.superlike,
     });
 
-    return { ok: true, pingId: ping.id };
+    return { ok: true, matched: false, pingId: ping.id };
   });
 
   /**
@@ -234,8 +308,8 @@ const discoveryRoutes: FastifyPluginAsync = async (app) => {
       data: { status: "accepted" },
     });
 
-    // Create or fetch existing chat
-    const chat = await getOrCreateDm(app, ping.fromUserId, ping.toUserId);
+    // Create the DM chat + a `matched` Connection so it shows in Connections.
+    const chat = await createMatchConnection(app, ping.fromUserId, ping.toUserId);
 
     // Notify the sender via socket
     const toProfile = await app.prisma.profile.findUnique({ where: { userId } });

@@ -28,3 +28,9 @@ apps/api/prisma/migrations/**/migration_lock.toml
 
 # Temporary Claude Code agent worktrees
 .claude/worktrees/
+
+# Android signing — keep local, BACK UP SECURELY (losing it = can't update the app)
+apps/mobile/credentials/
+apps/mobile/credentials.json
+*.keystore
+*.jks

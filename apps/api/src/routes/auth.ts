@@ -1,7 +1,6 @@
 import type { FastifyPluginAsync, FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import crypto from "crypto";
-import { isVerifyConfigured, startVerification, checkVerification } from "../lib/twilio.js";
 
 // ─── Validation schemas ───────────────────────────────────────────────────────
 
@@ -146,17 +145,6 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(429).send({ error: "Too many OTP requests. Please wait 10 minutes." });
     }
 
-    // Preferred path: Twilio Verify generates, delivers & tracks the OTP itself.
-    if (isVerifyConfigured(app.env)) {
-      try {
-        await startVerification(app.env, body.phone);
-      } catch (err) {
-        app.log.error({ err }, "Twilio Verify start failed");
-        return reply.status(500).send({ error: "Failed to send OTP. Please try again." });
-      }
-      return reply.send({ ok: true, expiresIn: 600 });
-    }
-
     // Invalidate any existing unused OTPs for this phone
     await app.prisma.otpCode.updateMany({
       where: { phone: body.phone, used: false },
@@ -171,27 +159,10 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       data: { phone: body.phone, code, expiresAt },
     });
 
-    // Send via Twilio in production
-    if (app.env.NODE_ENV === "production") {
-      const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER } = app.env;
-      if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER) {
-        try {
-          // Dynamic import to avoid loading Twilio in dev
-          const twilio = await import("twilio");
-          const client = twilio.default(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-          await client.messages.create({
-            body: `Your VYBEON verification code is: ${code}. Expires in 10 minutes.`,
-            from: TWILIO_PHONE_NUMBER,
-            to: body.phone,
-          });
-        } catch (smsErr) {
-          app.log.error({ err: smsErr }, "Failed to send OTP SMS");
-          return reply.status(500).send({ error: "Failed to send OTP. Please try again." });
-        }
-      }
-    } else {
-      app.log.info({ phone: body.phone, code }, "DEV OTP (not sending SMS)");
-    }
+    // NOTE: SMS delivery (Twilio) has been removed. In development the code is
+    // returned inline (devCode) / logged. For production phone-OTP delivery,
+    // wire a new SMS provider here; otherwise use Google Sign-In. See LAUNCH.md.
+    app.log.info({ phone: body.phone, code }, "OTP generated (no SMS provider configured)");
 
     return reply.send({
       ok: true,
@@ -211,36 +182,6 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       body = verifyOtpBody.parse(req.body);
     } catch (err) {
       return reply.status(400).send({ error: "Invalid request body" });
-    }
-
-    // Preferred path: verify the code with Twilio Verify.
-    if (isVerifyConfigured(app.env)) {
-      let approved = false;
-      try {
-        approved = await checkVerification(app.env, body.phone, body.code);
-      } catch (err) {
-        app.log.error({ err }, "Twilio Verify check failed");
-        return reply.status(400).send({ error: "Could not verify code. Request a new one." });
-      }
-      if (!approved) {
-        return reply.status(400).send({ error: "Invalid or expired code." });
-      }
-
-      let isNewUser = false;
-      let user = await app.prisma.user.findUnique({ where: { phone: body.phone } });
-      if (!user) {
-        user = await app.prisma.user.create({
-          data: { phone: body.phone, subscription: { create: { plan: "free" } } },
-        });
-        isNewUser = true;
-      }
-
-      const response = await issueSession(app, reply, user, isNewUser, {
-        deviceId: body.deviceId,
-        deviceName: body.deviceName,
-        platform: body.platform,
-      });
-      return reply.send(response);
     }
 
     // Find the most recent unused OTP for this phone

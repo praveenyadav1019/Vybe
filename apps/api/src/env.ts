@@ -21,17 +21,14 @@ const schema = z.object({
   // CORS
   CORS_ORIGIN: z.string().default("*"),
 
-  // SMS – optional in development (falls back to console log)
-  TWILIO_ACCOUNT_SID: z.string().optional(),
-  TWILIO_AUTH_TOKEN: z.string().optional(),
-  TWILIO_PHONE_NUMBER: z.string().optional(),
-  // Twilio Verify (preferred for OTP) + Messaging Service
-  TWILIO_VERIFY_SERVICE_SID: z.string().optional(),
-  TWILIO_MESSAGING_SERVICE_SID: z.string().optional(),
-
-  // Agora – optional; placeholder token used when cert is absent
-  AGORA_APP_ID: z.string().optional(),
-  AGORA_APP_CERTIFICATE: z.string().optional(),
+  // WebRTC TURN/STUN (self-hosted coturn). TURN_HOST + TURN_SECRET enable
+  // relay; without them only public STUN is returned (not production-viable).
+  TURN_HOST: z.string().optional(),          // public IP or domain of coturn
+  TURN_SECRET: z.string().optional(),         // coturn static-auth-secret
+  TURN_REALM: z.string().default("vybeon"),
+  TURN_PORT: z.coerce.number().default(3478),
+  TURN_TLS_PORT: z.coerce.number().default(5349),
+  TURN_TLS_ENABLED: z.coerce.boolean().default(false),
 
   // Storage (S3 or Cloudflare R2 — R2 needs STORAGE_ENDPOINT set)
   STORAGE_CDN_URL: z.string().default("https://cdn.vybeon.com"),
@@ -63,13 +60,12 @@ export function loadEnv(): Env {
 
   const data = parsed.data;
 
-  // Additional production guards
+  // Additional production guards: TURN is required for reliable calling.
   if (data.NODE_ENV === "production") {
-    const required = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"] as const;
-    for (const key of required) {
-      if (!data[key]) {
-        throw new Error(`${key} is required in production`);
-      }
+    if (!data.TURN_HOST || !data.TURN_SECRET) {
+      console.warn(
+        "⚠️  TURN_HOST/TURN_SECRET not set — WebRTC calls will fail on symmetric NAT (mobile networks). Configure coturn for production.",
+      );
     }
   }
 

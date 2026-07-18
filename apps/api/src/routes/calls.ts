@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { requireUserId } from "../lib/auth.js";
+import { buildIceServers } from "../lib/ice.js";
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
@@ -9,43 +10,6 @@ const requestCallBody = z.object({
   targetUserId: z.string().min(1),
   type: z.enum(["audio", "video"]),
 });
-
-// ─── Agora token helper ───────────────────────────────────────────────────────
-
-/**
- * Generate an Agora RTC token.
- * Falls back to a placeholder string if AGORA_APP_CERTIFICATE is not configured.
- */
-async function generateAgoraToken(
-  appId: string | undefined,
-  appCertificate: string | undefined,
-  channelName: string,
-  uid: number,
-  role: number,
-  expireSeconds: number
-): Promise<string> {
-  if (!appId || !appCertificate) {
-    // Return a clearly-labelled placeholder so clients know to skip Agora init
-    return `DEV_TOKEN_NO_CERT_${channelName}_${uid}`;
-  }
-
-  try {
-    const { RtcTokenBuilder, RtcRole } = await import("agora-token");
-    const privilegeExpiredTs = Math.floor(Date.now() / 1000) + expireSeconds;
-    return RtcTokenBuilder.buildTokenWithUid(
-      appId,
-      appCertificate,
-      channelName,
-      uid,
-      role,
-      privilegeExpiredTs,
-      privilegeExpiredTs
-    );
-  } catch {
-    // agora-token not installed or cert invalid – return placeholder
-    return `AGORA_TOKEN_ERROR_${channelName}_${uid}`;
-  }
-}
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -118,24 +82,12 @@ const callsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const channelName = `call_${randomUUID()}`;
-    const tokenExpirySeconds = 3600; // 1 hour
-
-    // Generate Agora RTC token for the initiator (uid = 1)
-    const agoraToken = await generateAgoraToken(
-      app.env.AGORA_APP_ID,
-      app.env.AGORA_APP_CERTIFICATE,
-      channelName,
-      1, // initiator uid
-      1, // RtcRole.PUBLISHER
-      tokenExpirySeconds
-    );
 
     const call = await app.prisma.callSession.create({
       data: {
         type: body.type as any,
         status: "ringing",
         channelName,
-        agoraToken,
         users: { connect: [{ id: userId }, { id: body.targetUserId }] },
       },
     });
@@ -167,14 +119,15 @@ const callsRoutes: FastifyPluginAsync = async (app) => {
       ok: true,
       callId: call.id,
       channelName,
-      agoraToken,
+      iceServers: buildIceServers(app.env, userId),
       type: body.type,
     };
   });
 
   /**
    * POST /calls/:id/accept
-   * Accept an incoming call. Generates Agora token for the receiver.
+   * Accept an incoming call. Marks it active and notifies the initiator so
+   * both peers can begin the WebRTC offer/answer exchange over the socket.
    */
   app.post("/calls/:id/accept", { preHandler: [app.authenticate] }, async (req, reply) => {
     const userId = requireUserId(req);
@@ -192,43 +145,32 @@ const callsRoutes: FastifyPluginAsync = async (app) => {
     // Determine initiator (the other user)
     const initiator = call.users.find((u) => u.id !== userId);
 
-    const tokenExpirySeconds = 3600;
-    const receiverToken = await generateAgoraToken(
-      app.env.AGORA_APP_ID,
-      app.env.AGORA_APP_CERTIFICATE,
-      call.channelName!,
-      2, // receiver uid
-      1, // RtcRole.PUBLISHER
-      tokenExpirySeconds
-    );
-
     const updated = await app.prisma.callSession.update({
       where: { id: callId },
       data: { status: "active", startedAt: new Date() },
     });
 
-    // Notify initiator
+    // Notify initiator to start negotiating (they create the SDP offer).
     if (initiator) {
       app.io?.to(`user:${initiator.id}`).emit("call:accepted", {
         id: callId,
         channelName: call.channelName,
-        agoraToken: call.agoraToken, // initiator's existing token
       });
     }
 
     return {
       ok: true,
       channelName: updated.channelName,
-      agoraToken: receiverToken,
+      iceServers: buildIceServers(app.env, userId),
     };
   });
 
   /**
-   * GET /calls/:id/agora-token
-   * Return Agora join credentials for a participant. Token is signed with
-   * uid 0 (valid for any uid), so either party can join the channel.
+   * GET /calls/:id/ice
+   * Return WebRTC ICE servers (STUN + short-lived TURN credentials) for a
+   * call participant. Either party can fetch this to (re)configure their peer.
    */
-  app.get("/calls/:id/agora-token", { preHandler: [app.authenticate] }, async (req, reply) => {
+  app.get("/calls/:id/ice", { preHandler: [app.authenticate] }, async (req, reply) => {
     const userId = requireUserId(req);
     const callId = z.string().min(1).parse((req.params as { id: string }).id);
 
@@ -239,20 +181,10 @@ const callsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(404).send({ error: "Call not found" });
     }
 
-    const token = await generateAgoraToken(
-      app.env.AGORA_APP_ID,
-      app.env.AGORA_APP_CERTIFICATE,
-      call.channelName,
-      0, // uid 0 → token usable by any uid
-      1, // RtcRole.PUBLISHER
-      3600
-    );
-
     return {
       ok: true,
-      appId: app.env.AGORA_APP_ID ?? null,
       channelName: call.channelName,
-      token,
+      iceServers: buildIceServers(app.env, userId),
     };
   });
 

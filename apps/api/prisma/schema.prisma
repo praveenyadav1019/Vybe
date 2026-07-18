@@ -255,7 +255,6 @@ model CallSession {
   type        CallType
   status      CallStatus @default(ringing)
   channelName String?
-  agoraToken  String?
   startedAt   DateTime?
   endedAt     DateTime?
   duration    Int?

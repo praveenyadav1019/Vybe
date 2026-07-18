@@ -2,6 +2,7 @@ import type { Server, Socket } from "socket.io";
 import type { FastifyInstance } from "fastify";
 import jwt from "jsonwebtoken";
 import { notifyIfOffline } from "./lib/push.js";
+import { buildIceServers } from "./lib/ice.js";
 
 // ─── Stranger Chat Types ──────────────────────────────────────────────────────
 
@@ -613,16 +614,6 @@ export function attachSocketIO(io: Server, app: FastifyInstance): void {
       }
     });
 
-    // ── party:join-room — subscribe to party updates ──────────────────────
-    socket.on("party:join-room", (payload: { partyId: string }) => {
-      if (!payload.partyId) return;
-      void socket.join(`party:${payload.partyId}`);
-    });
-
-    socket.on("party:leave-room", (payload: { partyId: string }) => {
-      if (!payload.partyId) return;
-      void socket.leave(`party:${payload.partyId}`);
-    });
 
     // ── connections:update — broadcast when a new connection is made ───────
     socket.on("connections:request-update", async () => {
@@ -634,25 +625,6 @@ export function attachSocketIO(io: Server, app: FastifyInstance): void {
       } catch (e) {
         app.log.error(e, "connections:request-update failed");
       }
-    });
-
-    // ── venue:activity ─────────────────────────────────────────────────────
-    socket.on("venue:join", async (payload: { placeId: string }) => {
-      try {
-        if (!payload.placeId) return;
-        void socket.join(`venue:${payload.placeId}`);
-        socket.to(`venue:${payload.placeId}`).emit("venue:activity", {
-          type: "user_joined",
-          placeId: payload.placeId,
-        });
-      } catch (e) {
-        app.log.error(e, "venue:join failed");
-      }
-    });
-
-    socket.on("venue:leave", (payload: { placeId: string }) => {
-      if (!payload.placeId) return;
-      void socket.leave(`venue:${payload.placeId}`);
     });
 
     // ══════════════════════════════════════════════════════════════════════
@@ -890,32 +862,12 @@ export function attachSocketIO(io: Server, app: FastifyInstance): void {
       }
     });
 
-    // stranger:upgrade-video — upgrade current text session to video
+    // stranger:upgrade-video — upgrade current text session to video.
+    // The user who initiates the upgrade becomes the WebRTC offerer.
     socket.on("stranger:upgrade-video", async () => {
       try {
         const session = await getStrangerSession(app.redis, userId);
         if (!session) return;
-
-        // Generate Agora token if configured
-        let agoraToken: string | null = null;
-        const { AGORA_APP_ID, AGORA_APP_CERTIFICATE } = app.env;
-        if (AGORA_APP_ID && AGORA_APP_CERTIFICATE) {
-          try {
-            const { RtcTokenBuilder, RtcRole } = await import("agora-token");
-            const expireTs = Math.floor(Date.now() / 1000) + 3600;
-            agoraToken = RtcTokenBuilder.buildTokenWithUid(
-              AGORA_APP_ID,
-              AGORA_APP_CERTIFICATE,
-              session.roomId,
-              0,
-              RtcRole.PUBLISHER,
-              expireTs,
-              expireTs
-            );
-          } catch {
-            app.log.warn("Agora token generation failed – proceeding without");
-          }
-        }
 
         // Update session mode
         await app.prisma.strangerSession.update({
@@ -923,21 +875,27 @@ export function attachSocketIO(io: Server, app: FastifyInstance): void {
           data:  { mode: "video" },
         });
 
-        const upgradePayload = {
-          sessionId:  session.sessionId,
-          roomId:     session.roomId,
-          agoraToken,
-          agoraAppId: AGORA_APP_ID ?? null,
-        };
-
-        socket.emit("stranger:video-ready", upgradePayload);
-        io.to(`user:${session.partnerId}`).emit("stranger:video-ready", upgradePayload);
+        // Both peers get ICE servers; `isOfferer` tells the client who creates
+        // the SDP offer so the peer connection negotiates deterministically.
+        const iceServers = buildIceServers(app.env, userId);
+        socket.emit("stranger:video-ready", {
+          sessionId: session.sessionId,
+          roomId:    session.roomId,
+          iceServers,
+          isOfferer: true,
+        });
+        io.to(`user:${session.partnerId}`).emit("stranger:video-ready", {
+          sessionId: session.sessionId,
+          roomId:    session.roomId,
+          iceServers: buildIceServers(app.env, session.partnerId),
+          isOfferer: false,
+        });
       } catch (e) {
         app.log.error(e, "stranger:upgrade-video failed");
       }
     });
 
-    // WebRTC relay for stranger peer connections (when Agora is not available)
+    // WebRTC relay for stranger peer connections
     socket.on("stranger:webrtc-offer", async (p: { sdp: unknown }) => {
       const session = await getStrangerSession(app.redis, userId).catch(() => null);
       if (!session) return;
