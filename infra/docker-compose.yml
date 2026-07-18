@@ -81,6 +81,18 @@ services:
       TURN_PORT: ${TURN_PORT:-3478}
       TURN_TLS_PORT: ${TURN_TLS_PORT:-5349}
       TURN_TLS_ENABLED: ${TURN_TLS_ENABLED:-false}
+      # Google Sign-In — the API verifies ID tokens against these audiences.
+      # Without them /auth/google returns 503 "Google Sign-In is not configured".
+      # These are public OAuth client IDs (shipped in the app), not secrets.
+      GOOGLE_CLIENT_ID_WEB: ${GOOGLE_CLIENT_ID_WEB:-}
+      GOOGLE_CLIENT_ID_ANDROID: ${GOOGLE_CLIENT_ID_ANDROID:-}
+      GOOGLE_CLIENT_ID_IOS: ${GOOGLE_CLIENT_ID_IOS:-}
+      # Object storage for profile photos (presigned uploads).
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-vybeon-media}
+      STORAGE_REGION: ${STORAGE_REGION:-ap-south-1}
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-}
       STORAGE_CDN_URL: ${STORAGE_CDN_URL:-https://cdn.vybeon.com}
     # Loopback only — public traffic arrives via nginx (:80), which reaches the
     # API as api:4000 over the compose network, not through this host port.
