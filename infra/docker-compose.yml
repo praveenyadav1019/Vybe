@@ -127,11 +127,19 @@ services:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
       # TLS certs for turns:// (mount your fullchain + privkey):
       # - ./certs:/etc/coturn/certs:ro
+    # TURN_PRIVATE_IP = the host's primary NIC address (`hostname -I | awk '{print $1}'`).
+    # On a NAT'd cloud host (EC2/GCP) this differs from the public IP, and coturn
+    # must be told the mapping as PUBLIC/PRIVATE — otherwise it advertises the
+    # private address in ICE candidates and relayed calls fail. Pinning
+    # listening/relay IP also stops it binding the docker bridge interfaces.
+    # On a non-NAT VPS set TURN_PRIVATE_IP to the same value as TURN_EXTERNAL_IP.
     command: >
       -c /etc/coturn/turnserver.conf
       --static-auth-secret=${TURN_SECRET:-change-me}
       --realm=${TURN_REALM:-vybeon}
-      --external-ip=${TURN_EXTERNAL_IP}
+      --listening-ip=${TURN_PRIVATE_IP}
+      --relay-ip=${TURN_PRIVATE_IP}
+      --external-ip=${TURN_EXTERNAL_IP}/${TURN_PRIVATE_IP}
 
   # ── Nginx (reverse proxy) ─────────────────────────────────────────────────
   nginx:
