@@ -91,7 +91,7 @@ docker compose -f "$COMPOSE_FILE" up -d --remove-orphans 2>&1 | tee -a "$LOG_FIL
 log "Waiting for API to become healthy…"
 MAX_TRIES=30
 TRIES=0
-until docker compose -f "$COMPOSE_FILE" exec -T api wget -qO- http://localhost:4000/health >/dev/null 2>&1; do
+until docker compose -f "$COMPOSE_FILE" exec -T api wget -qO- http://127.0.0.1:4000/health >/dev/null 2>&1; do
   TRIES=$((TRIES + 1))
   if [ "$TRIES" -ge "$MAX_TRIES" ]; then
     die "Health check failed after ${MAX_TRIES} attempts. Check logs: docker compose -f $COMPOSE_FILE logs api"

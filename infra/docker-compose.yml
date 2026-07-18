@@ -106,7 +106,10 @@ services:
     networks:
       - vybeon-network
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
+      # Use 127.0.0.1, NOT localhost: inside the container `localhost` resolves
+      # to ::1 first and the API binds IPv4 only, so the check would always fail
+      # and nginx (depends_on: service_healthy) would never start.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
