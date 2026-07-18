@@ -42,6 +42,20 @@ if [ ! -d "$APP_DIR/.git" ]; then
 fi
 chown -R ubuntu:ubuntu "$APP_DIR"
 
+# ── Swap ─────────────────────────────────────────────────────────────────────
+# The API image is built ON the box (docker compose build). npm install + tsc
+# can exceed 2 GB RAM on a t3.small and get OOM-killed mid-build. 2 GB of swap
+# makes the build survive on small instances.
+if [ ! -f /swapfile ]; then
+  fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  sysctl -w vm.swappiness=10
+  echo 'vm.swappiness=10' > /etc/sysctl.d/99-vybe-swap.conf
+fi
+
 # ── Kernel tuning for a TURN relay (many concurrent UDP flows) ───────────────
 cat >/etc/sysctl.d/99-vybe-turn.conf <<'EOF'
 net.core.rmem_max=16777216
