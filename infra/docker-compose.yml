@@ -20,10 +20,12 @@ services:
     environment:
       POSTGRES_DB: vybeon
       POSTGRES_USER: vybeon
-      POSTGRES_PASSWORD: vybeon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vybeon}
       PGDATA: /var/lib/postgresql/data/pgdata
+    # Bound to loopback only: the API reaches Postgres over the compose network
+    # (postgres:5432). Never expose the DB on the public interface.
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -41,8 +43,9 @@ services:
     container_name: vybeon_redis
     restart: unless-stopped
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # Loopback only — reached as redis:6379 over the compose network.
     ports:
-      - "6381:6379"
+      - "127.0.0.1:6381:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -63,21 +66,26 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: postgresql://vybeon:vybeon@postgres:5432/vybeon?schema=public
+      DATABASE_URL: postgresql://vybeon:${POSTGRES_PASSWORD:-vybeon}@postgres:5432/vybeon?schema=public
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars-!!!}
       JWT_EXPIRES_IN: 15m
       JWT_REFRESH_EXPIRES_IN: 30d
       LOCATION_TTL_SECONDS: 300
       CORS_ORIGIN: ${CORS_ORIGIN:-*}
-      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
-      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
-      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
-      AGORA_APP_ID: ${AGORA_APP_ID:-}
-      AGORA_APP_CERTIFICATE: ${AGORA_APP_CERTIFICATE:-}
+      # WebRTC TURN/STUN (self-hosted coturn). TURN_HOST must be the PUBLIC IP
+      # or domain reachable by clients — not the docker service name.
+      TURN_HOST: ${TURN_HOST:-}
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_REALM: ${TURN_REALM:-vybeon}
+      TURN_PORT: ${TURN_PORT:-3478}
+      TURN_TLS_PORT: ${TURN_TLS_PORT:-5349}
+      TURN_TLS_ENABLED: ${TURN_TLS_ENABLED:-false}
       STORAGE_CDN_URL: ${STORAGE_CDN_URL:-https://cdn.vybeon.com}
+    # Loopback only — public traffic arrives via nginx (:80), which reaches the
+    # API as api:4000 over the compose network, not through this host port.
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,6 +99,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # ── coturn (WebRTC TURN/STUN) ─────────────────────────────────────────────
+  # Uses host networking so it can advertise the real public IP and open the
+  # UDP relay port range. Set TURN_SECRET + TURN_EXTERNAL_IP in your .env.
+  coturn:
+    image: coturn/coturn:4.6
+    container_name: vybeon_coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # TLS certs for turns:// (mount your fullchain + privkey):
+      # - ./certs:/etc/coturn/certs:ro
+    command: >
+      -c /etc/coturn/turnserver.conf
+      --static-auth-secret=${TURN_SECRET:-change-me}
+      --realm=${TURN_REALM:-vybeon}
+      --external-ip=${TURN_EXTERNAL_IP}
 
   # ── Nginx (reverse proxy) ─────────────────────────────────────────────────
   nginx:
