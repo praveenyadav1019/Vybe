@@ -37,6 +37,10 @@ const schema = z.object({
   STORAGE_ENDPOINT: z.string().optional(),
   STORAGE_ACCESS_KEY: z.string().optional(),
   STORAGE_SECRET_KEY: z.string().optional(),
+  // On AWS, prefer an EC2 instance role over long-lived keys: set this true and
+  // leave STORAGE_ACCESS_KEY/SECRET empty. The SDK then resolves credentials
+  // from IMDS, so no storage secrets are stored on the box at all.
+  STORAGE_USE_INSTANCE_ROLE: z.coerce.boolean().default(false),
 
   // Google OAuth (Sign-In) — verify ID tokens issued to these client IDs
   GOOGLE_CLIENT_ID_WEB: z.string().optional(),

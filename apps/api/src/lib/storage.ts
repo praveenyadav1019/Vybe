@@ -27,8 +27,17 @@ export interface PresignedUpload {
   publicUrl: string;
 }
 
+/**
+ * Storage is usable when we have a bucket AND some way to sign requests:
+ *  - explicit keys (Cloudflare R2, MinIO, or S3 with an IAM user), or
+ *  - the ambient AWS credential chain (an EC2 instance role / IRSA), which is
+ *    the preferred setup on AWS since it avoids long-lived secrets entirely.
+ * `STORAGE_USE_INSTANCE_ROLE=true` opts into the latter.
+ */
 export function isStorageConfigured(env: Env): boolean {
-  return Boolean(env.STORAGE_ACCESS_KEY && env.STORAGE_SECRET_KEY);
+  if (!env.STORAGE_BUCKET) return false;
+  if (env.STORAGE_ACCESS_KEY && env.STORAGE_SECRET_KEY) return true;
+  return env.STORAGE_USE_INSTANCE_ROLE === true;
 }
 
 function extFor(contentType: string): string {
@@ -51,15 +60,23 @@ export async function createPresignedUpload(
 
   const fileKey = `photos/${userId}/${randomUUID()}.${extFor(contentType)}`;
 
+  const hasExplicitKeys = Boolean(env.STORAGE_ACCESS_KEY && env.STORAGE_SECRET_KEY);
+
   const client = new S3Client({
     region: env.STORAGE_REGION,
     endpoint: env.STORAGE_ENDPOINT || undefined,
     // R2 / MinIO require path-style addressing; native S3 does not.
     forcePathStyle: Boolean(env.STORAGE_ENDPOINT),
-    credentials: {
-      accessKeyId: env.STORAGE_ACCESS_KEY!,
-      secretAccessKey: env.STORAGE_SECRET_KEY!,
-    },
+    // Omitting `credentials` lets the SDK use its default provider chain, which
+    // picks up the EC2 instance role from IMDS — no secrets on disk.
+    ...(hasExplicitKeys
+      ? {
+          credentials: {
+            accessKeyId: env.STORAGE_ACCESS_KEY!,
+            secretAccessKey: env.STORAGE_SECRET_KEY!,
+          },
+        }
+      : {}),
   });
 
   const command = new PutObjectCommand({

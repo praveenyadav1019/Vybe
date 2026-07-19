@@ -93,6 +93,7 @@ services:
       STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-}
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-}
       STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-}
+      STORAGE_USE_INSTANCE_ROLE: ${STORAGE_USE_INSTANCE_ROLE:-false}
       STORAGE_CDN_URL: ${STORAGE_CDN_URL:-https://cdn.vybeon.com}
     # Loopback only — public traffic arrives via nginx (:80), which reaches the
     # API as api:4000 over the compose network, not through this host port.
