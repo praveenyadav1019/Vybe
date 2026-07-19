@@ -11,6 +11,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/stores/authStore';
 import { api } from '../../src/lib/api';
+import { ScreenGradient } from '../../src/components/ui/ScreenGradient';
 
 // ─── Color tokens ─────────────────────────────────────────────────────────────
 const ink      = '#1A1A2E';
@@ -76,7 +77,8 @@ export default function ProfileTabScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={white} />
+      <ScreenGradient />
+      <StatusBar barStyle="dark-content" backgroundColor="#ECE4FF" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}>
 
@@ -146,9 +148,9 @@ export default function ProfileTabScreen() {
             color="#7C3AED"
           />
           <StatTile
-            icon="location-outline"
-            value={user?.isPremium ? '14' : '—'}
-            label="Check-ins"
+            icon="shield-checkmark-outline"
+            value={user?.isVerified ? 'Yes' : 'No'}
+            label="Verified"
             color="#059669"
           />
         </Animated.View>
@@ -207,11 +209,11 @@ export default function ProfileTabScreen() {
 const stat = StyleSheet.create({
   tile: {
     flex: 1, alignItems: 'center', gap: 5,
-    backgroundColor: white,
+    backgroundColor: 'rgba(255,255,255,0.55)',
     borderRadius: 16, padding: 14,
-    borderWidth: 1, borderColor: border,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
+    shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08, shadowRadius: 10, elevation: 2,
   },
   iconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   value: { fontSize: 20, fontWeight: '800', color: ink },
@@ -222,7 +224,7 @@ const stat = StyleSheet.create({
 const AVATAR_SIZE = 100;
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: white },
+  root: { flex: 1, backgroundColor: '#F7F2FF' },
 
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -283,12 +285,12 @@ const styles = StyleSheet.create({
   actionLabel: { fontSize: 11, fontWeight: '500', color: inkSec },
 
   menuCard: {
-    marginHorizontal: 20, backgroundColor: bgSec,
+    marginHorizontal: 20, backgroundColor: 'rgba(255,255,255,0.55)',
     borderRadius: 20, overflow: 'hidden',
-    borderWidth: 1, borderColor: border,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
   },
   menuRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
-  menuIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: white, alignItems: 'center', justifyContent: 'center' },
+  menuIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.7)', alignItems: 'center', justifyContent: 'center' },
   menuLabel: { flex: 1, fontSize: 15, color: ink },
   menuDivider: { height: 1, backgroundColor: border, marginLeft: 64 },
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  StatusBar, Alert, Dimensions,
+  StatusBar, Alert, Dimensions, Modal, ScrollView, Pressable,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,8 @@ import Animated, { FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withSpr
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadPhoto } from '@/lib/uploadPhoto';
+import { api } from '@/lib/api';
+import { AVATARS } from '@/lib/avatars';
 
 const { width: W } = Dimensions.get('window');
 const GRID_GAP = 10;
@@ -28,7 +30,7 @@ const border  = '#E5E7EB';
 const gold    = '#C9A84C';
 const goldSoft = '#FDF6E3';
 
-const MIN_PHOTOS = 3;
+const MIN_PHOTOS = 1;
 const MAX_PHOTOS = 6;
 
 const TIPS = [
@@ -36,6 +38,7 @@ const TIPS = [
   { emoji: '😊', text: 'Smile and be authentic' },
   { emoji: '✈️', text: 'Showcase your interests or travel' },
 ];
+
 
 // ─── Photo cell ───────────────────────────────────────────────────────────────
 function PhotoCell({
@@ -102,9 +105,33 @@ export default function PhotoUploadScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [photos, setPhotos] = useState<Array<string | null>>(Array(MAX_PHOTOS).fill(null));
+  const [targetIndex, setTargetIndex] = useState<number | null>(null);
+  const [sheet, setSheet] = useState<'menu' | 'avatars' | null>(null);
 
   const filledCount = photos.filter(Boolean).length;
   const canContinue = filledCount >= MIN_PHOTOS;
+
+  function openChooser(index: number) {
+    setTargetIndex(index);
+    setSheet('menu');
+  }
+  function closeSheet() {
+    setSheet(null);
+    setTargetIndex(null);
+  }
+
+  // Choose a prebuilt avatar: set it locally and persist the URL like a photo.
+  async function handlePickAvatar(url: string) {
+    if (targetIndex === null) return;
+    const idx = targetIndex;
+    setPhotos((cur) => { const n = [...cur]; n[idx] = url; return n; });
+    closeSheet();
+    try {
+      await api.post('/me/photos', { urls: [url] });
+    } catch {
+      /* keep the local selection; it'll be re-sent if the user re-picks */
+    }
+  }
 
   async function handleAddPhoto(index: number) {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -164,7 +191,7 @@ export default function PhotoUploadScreen() {
       <Animated.View entering={FadeInDown.delay(60).duration(350)} style={styles.titleBlock}>
         <Text style={styles.title}>Show Your Best Self</Text>
         <Text style={styles.subtitle}>
-          Add at least {MIN_PHOTOS} high-quality photos to unlock full{'\n'}profiles and get noticed.
+          Add at least 1 photo or avatar to continue.{'\n'}More photos help you get noticed.
         </Text>
       </Animated.View>
 
@@ -176,7 +203,7 @@ export default function PhotoUploadScreen() {
             photo={photo}
             index={i}
             isHighlighted={i === highlightedIdx}
-            onPress={() => handleAddPhoto(i)}
+            onPress={() => openChooser(i)}
             onRemove={() => handleRemove(i)}
           />
         ))}
@@ -212,6 +239,80 @@ export default function PhotoUploadScreen() {
           </LinearGradient>
         </TouchableOpacity>
       </View>
+
+      {/* ── Add-photo chooser + avatar picker ─────────────────────────────── */}
+      <Modal
+        visible={sheet !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={closeSheet}
+        statusBarTranslucent
+      >
+        <Pressable style={styles.modalBackdrop} onPress={closeSheet}>
+          <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHandle} />
+
+            {sheet === 'menu' && (
+              <>
+                <Text style={styles.sheetTitle}>Add a photo</Text>
+                <Text style={styles.sheetSub}>Upload your own or pick a ready-made avatar</Text>
+
+                <TouchableOpacity
+                  style={styles.optionRow}
+                  activeOpacity={0.85}
+                  onPress={() => { const idx = targetIndex; setSheet(null); if (idx != null) handleAddPhoto(idx); }}
+                >
+                  <View style={[styles.optionIcon, { backgroundColor: brandSoft }]}>
+                    <Ionicons name="image-outline" size={22} color={brand} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.optionTitle}>Upload Photo</Text>
+                    <Text style={styles.optionDesc}>Choose from your library</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={inkSec} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.optionRow}
+                  activeOpacity={0.85}
+                  onPress={() => setSheet('avatars')}
+                >
+                  <View style={[styles.optionIcon, { backgroundColor: goldSoft }]}>
+                    <Ionicons name="happy-outline" size={22} color={gold} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.optionTitle}>Choose Avatar</Text>
+                    <Text style={styles.optionDesc}>Pick a prebuilt avatar</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={inkSec} />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {sheet === 'avatars' && (
+              <>
+                <View style={styles.avatarHeader}>
+                  <TouchableOpacity onPress={() => setSheet('menu')} hitSlop={8}>
+                    <Ionicons name="chevron-back" size={22} color={ink} />
+                  </TouchableOpacity>
+                  <Text style={styles.sheetTitle}>Choose an avatar</Text>
+                  <View style={{ width: 22 }} />
+                </View>
+                <ScrollView
+                  contentContainerStyle={styles.avatarGrid}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {AVATARS.map((url) => (
+                    <TouchableOpacity key={url} activeOpacity={0.8} onPress={() => handlePickAvatar(url)}>
+                      <Image source={{ uri: url }} style={styles.avatarImg} contentFit="cover" transition={150} />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -280,4 +381,57 @@ const styles = StyleSheet.create({
   continueBtnInner: { height: 54, alignItems: 'center', justifyContent: 'center' },
   continueBtnText: { fontSize: 16, fontWeight: '700', color: white },
   continueBtnTextDisabled: { color: '#9CA3AF' },
+
+  // ── Chooser / avatar sheet ──────────────────────────────────────────────
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: white,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    maxHeight: '80%',
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: border,
+    marginBottom: 16,
+  },
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: ink, textAlign: 'center' },
+  sheetSub: { fontSize: 13, color: inkSec, textAlign: 'center', marginTop: 4, marginBottom: 16 },
+
+  optionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingVertical: 14, paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1, borderColor: border,
+    marginBottom: 12,
+  },
+  optionIcon: {
+    width: 44, height: 44, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  optionTitle: { fontSize: 15, fontWeight: '700', color: ink },
+  optionDesc: { fontSize: 12, color: inkSec, marginTop: 2 },
+
+  avatarHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  avatarGrid: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    gap: 14, justifyContent: 'center',
+    paddingBottom: 8,
+  },
+  avatarImg: {
+    width: (W - 40 - 14 * 2) / 3,
+    height: (W - 40 - 14 * 2) / 3,
+    borderRadius: 16,
+    backgroundColor: bgSec,
+  },
 });

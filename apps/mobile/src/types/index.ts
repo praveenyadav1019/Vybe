@@ -94,6 +94,5 @@ export interface CallSession {
   receiverId: string;
   type: CallType;
   status: 'pending' | 'accepted' | 'rejected' | 'active' | 'ended';
-  agoraToken?: string;
   channelName?: string;
 }

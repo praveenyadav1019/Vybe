@@ -36,7 +36,7 @@ export async function deleteStoredValue(key: string): Promise<void> {
 }
 
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 // Token storage keys
 export const TOKEN_KEYS = {

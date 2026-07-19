@@ -34,6 +34,13 @@ function CustomTabBar({ state, navigation }: {
 
   return (
     <View style={[styles.tabBarWrapper, { paddingBottom: insets.bottom + 6 }]}>
+      <BlurView intensity={60} tint="light" style={StyleSheet.absoluteFill} />
+      <View style={StyleSheet.absoluteFill}>
+        <LinearGradient
+          colors={['rgba(255,255,255,0.55)', 'rgba(255,255,255,0.85)']}
+          style={StyleSheet.absoluteFill}
+        />
+      </View>
       <View style={styles.topBorder} />
       <View style={styles.tabBar}>
         {state.routes.map((route, index) => {
@@ -98,11 +105,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   topBorder: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#ECECF1',
+    backgroundColor: 'rgba(124,58,237,0.15)',
   },
   tabBar: {
     flexDirection: 'row',
@@ -255,7 +263,6 @@ export default function TabsLayout() {
         <Tabs.Screen name="meet"    options={{ title: 'Meet'    }} />
         <Tabs.Screen name="chat"    options={{ title: 'Chat'    }} />
         <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
-        <Tabs.Screen name="places"  options={{ href: null }}      />
       </Tabs>
       {pingInfo && (
         <GlobalPingToast info={pingInfo} onDismiss={dismissPing} />

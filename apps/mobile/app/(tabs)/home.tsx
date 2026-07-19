@@ -1,422 +1,383 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, ScrollView, FlatList, TouchableOpacity,
-  StyleSheet, StatusBar, ActivityIndicator,
+  View, Text, StyleSheet, StatusBar, TouchableOpacity,
+  ActivityIndicator, Dimensions, Modal,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
-  FadeInDown, useSharedValue, useAnimatedStyle, withRepeat,
-  withTiming, withSequence,
+  useSharedValue, useAnimatedStyle, withSpring, withTiming,
+  runOnJS, interpolate, Extrapolation,
 } from 'react-native-reanimated';
+import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../src/stores/authStore';
-import { useDiscoveryStore } from '../../src/stores/discoveryStore';
-import { useLocationStore } from '../../src/stores/locationStore';
-import { NearbyUser } from '../../src/types';
+import { api } from '../../src/lib/api';
+import { photoUri } from '../../src/lib/photo';
+import { ScreenGradient } from '../../src/components/ui/ScreenGradient';
 
-// ─── Design tokens (clean & minimal) ─────────────────────────────────────────────
-const ink     = '#111827';
-const brand   = '#7C3AED';
-const pink     = '#7C3AED';
-const accent  = '#7C3AED';
-const coral    = '#7C3AED';
-const inkSec  = '#6B7280';
-const muted   = '#9CA3AF';
-const white   = '#FFFFFF';
-const bg      = '#FFFFFF';
-const success = '#22C55E';
-const warn    = '#F59E0B';
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+const SWIPE_THRESHOLD = SCREEN_W * 0.28;
+const CARD_W = SCREEN_W - 32;
 
-// ─── Live pulse dot ────────────────────────────────────────────────────────────
-function PulseDot({ color = success }: { color?: string }) {
-  const scale   = useSharedValue(1);
-  const opacity = useSharedValue(0.85);
-  useEffect(() => {
-    scale.value   = withRepeat(withSequence(withTiming(1.5, { duration: 700 }), withTiming(1, { duration: 700 })), -1);
-    opacity.value = withRepeat(withSequence(withTiming(0.3, { duration: 700 }), withTiming(0.85, { duration: 700 })), -1);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }], opacity: opacity.value }));
-  return <Animated.View style={[styles.pulseDot, { backgroundColor: color }, style]} />;
+// ─── Tokens ──────────────────────────────────────────────────────────────────
+const ink = '#111827';
+const inkSec = '#6B7280';
+const brand = '#7C3AED';
+const white = '#FFFFFF';
+const like = '#22C55E';
+const nope = '#EF4444';
+const superBlue = '#3B9EFF';
+
+// ─── Feed types ────────────────────────────────────────────────────────────────
+interface FeedUser {
+  id: string;
+  name: string;
+  age?: number;
+  photoUrl?: string;
+  photos: string[];
+  interests: string[];
+  verified: boolean;
+  mode: string;
+  isOnline: boolean;
+  distanceBucket: string;
 }
 
-// ─── Section header ────────────────────────────────────────────────────────────
-function SectionHeader({
-  title, subtitle, onSeeAll, live, icon,
-}: {
-  title: string; subtitle?: string; onSeeAll?: () => void;
-  live?: boolean; icon?: string;
+type Decision = 'like' | 'pass' | 'superlike';
+
+// ─── Card ────────────────────────────────────────────────────────────────────
+function Card({ user, style, badgeOpacity }: {
+  user: FeedUser;
+  style?: any;
+  badgeOpacity?: { like: any; nope: any; superlike: any };
 }) {
+  const photo = photoUri(user.photos?.[0] ?? user.photoUrl);
   return (
-    <View style={styles.sectionHeader}>
-      <View style={{ gap: 2 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {icon && <Ionicons name={icon as any} size={16} color={brand} />}
-          {live && <PulseDot />}
-          <Text style={styles.sectionTitle}>{title}</Text>
-        </View>
-        {subtitle && <Text style={styles.sectionSub}>{subtitle}</Text>}
-      </View>
-      {onSeeAll && (
-        <TouchableOpacity onPress={onSeeAll} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={styles.seeAll}>See All</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-}
-
-// ─── Connection bubble ─────────────────────────────────────────────────────────
-function ConnectionBubble({
-  name, photo, isOnline, onPress,
-}: { name: string; photo?: string | null; isOnline: boolean; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={styles.connItem} onPress={onPress} activeOpacity={0.82}>
-      <View style={styles.connAvatarWrap}>
-        {photo ? (
-          <Image source={{ uri: photo }} style={styles.connAvatar} contentFit="cover" />
-        ) : (
-          <View style={[styles.connAvatar, styles.connAvatarFallback]}>
-            <Ionicons name="person" size={20} color={brand} />
-          </View>
-        )}
-        {isOnline && <View style={styles.connOnlineDot} />}
-      </View>
-      <Text style={styles.connName} numberOfLines={1}>{name.split(' ')[0]}</Text>
-    </TouchableOpacity>
-  );
-}
-
-// ─── Nearby person card ────────────────────────────────────────────────────────
-function PersonCard({ person, onPress }: { person: NearbyUser; onPress: () => void }) {
-  const photo = person.photos?.[0];
-  return (
-    <TouchableOpacity style={styles.personCard} activeOpacity={0.88} onPress={onPress}>
+    <Animated.View style={[styles.card, style]}>
       {photo ? (
-        <Image source={{ uri: photo }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+        <Image source={{ uri: photo }} style={StyleSheet.absoluteFillObject} contentFit="cover" transition={150} />
       ) : (
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#E9E0FF', alignItems: 'center', justifyContent: 'center' }]}>
-          <Ionicons name="person" size={36} color={brand} />
+        <View style={[StyleSheet.absoluteFillObject, styles.cardFallback]}>
+          <Ionicons name="person" size={72} color={brand} />
         </View>
       )}
       <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.75)']}
-        locations={[0.45, 1]}
+        colors={['transparent', 'rgba(0,0,0,0.05)', 'rgba(0,0,0,0.82)']}
+        locations={[0.4, 0.6, 1]}
         style={StyleSheet.absoluteFillObject}
       />
-      {person.isOnline && <View style={styles.personOnlineDot} />}
-      <View style={styles.personInfo}>
-        <Text style={styles.personName} numberOfLines={1}>{person.name}, {person.age}</Text>
-        <Text style={styles.personDist} numberOfLines={1}>{person.distance}</Text>
+
+      {/* Swipe badges */}
+      {badgeOpacity && (
+        <>
+          <Animated.View style={[styles.badge, styles.badgeLike, badgeOpacity.like]}>
+            <Text style={[styles.badgeText, { color: like }]}>LIKE</Text>
+          </Animated.View>
+          <Animated.View style={[styles.badge, styles.badgeNope, badgeOpacity.nope]}>
+            <Text style={[styles.badgeText, { color: nope }]}>NOPE</Text>
+          </Animated.View>
+          <Animated.View style={[styles.badge, styles.badgeSuper, badgeOpacity.superlike]}>
+            <Text style={[styles.badgeText, { color: superBlue }]}>SUPER</Text>
+          </Animated.View>
+        </>
+      )}
+
+      {user.isOnline && (
+        <View style={styles.onlinePill}>
+          <View style={styles.onlineDot} />
+          <Text style={styles.onlineText}>Online</Text>
+        </View>
+      )}
+
+      <View style={styles.cardInfo}>
+        <View style={styles.nameRow}>
+          <Text style={styles.cardName} numberOfLines={1}>
+            {user.name}{user.age ? `, ${user.age}` : ''}
+          </Text>
+          {user.verified && <Ionicons name="checkmark-circle" size={20} color="#4FC3F7" />}
+        </View>
+        <View style={styles.metaRow}>
+          <Ionicons name="location" size={13} color="rgba(255,255,255,0.85)" />
+          <Text style={styles.cardMeta}>{user.distanceBucket}</Text>
+        </View>
+        {user.interests?.length > 0 && (
+          <View style={styles.chipRow}>
+            {user.interests.slice(0, 3).map((it) => (
+              <View key={it} style={styles.chip}><Text style={styles.chipText}>{it}</Text></View>
+            ))}
+          </View>
+        )}
       </View>
-    </TouchableOpacity>
+    </Animated.View>
   );
 }
 
-// ─── Main screen ───────────────────────────────────────────────────────────────
+// ─── Screen ──────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const router  = useRouter();
-  const insets  = useSafeAreaInsets();
-  const user    = useAuthStore((s) => s.user);
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const user = useAuthStore((s) => s.user);
   const firstName = (user?.name ?? 'there').split(' ')[0];
 
-  const nearbyUsers = useDiscoveryStore((s) => s.nearbyUsers);
-  const lat = useLocationStore((s) => s.latitude);
-  const lng = useLocationStore((s) => s.longitude);
-  const city = useLocationStore((s) => s.city);
+  const [cards, setCards] = useState<FeedUser[]>([]);
+  const [index, setIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [match, setMatch] = useState<{ name: string; photo?: string } | null>(null);
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
 
-  // Mock connections (replaced by real API data when backend is live)
-  const mockConnections = [
-    { id: '1', name: 'Priya S', photo: null, isOnline: true },
-    { id: '2', name: 'Arjun K', photo: null, isOnline: true },
-    { id: '3', name: 'Nisha M', photo: null, isOnline: false },
-    { id: '4', name: 'Rahul V', photo: null, isOnline: true },
-    { id: '5', name: 'Sneha D', photo: null, isOnline: false },
-  ];
+  const loadFeed = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get<{ items: FeedUser[] }>('/discovery/feed', { params: { limit: 30 } });
+      setCards(data.items ?? []);
+      setIndex(0);
+    } catch {
+      setCards([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadFeed(); }, [loadFeed]);
+
+  // Advance to the next card and fire the like/superlike request.
+  const decide = useCallback((card: FeedUser, kind: Decision) => {
+    tx.value = 0;
+    ty.value = 0;
+    setIndex((i) => i + 1);
+    if (kind === 'pass') return;
+    api.post<{ matched?: boolean }>(`/users/${card.id}/ping`, kind === 'superlike' ? { superlike: true } : {})
+      .then(({ data }) => {
+        if (data?.matched) setMatch({ name: card.name, photo: card.photos?.[0] ?? card.photoUrl });
+      })
+      .catch(() => {/* already liked / rate-limited — ignore */});
+  }, [tx, ty]);
+
+  const top = cards[index];
+  const next = cards[index + 1];
+
+  const triggerSwipe = useCallback((kind: Decision) => {
+    if (!top) return;
+    if (kind === 'like') tx.value = withTiming(SCREEN_W * 1.5, { duration: 240 }, () => runOnJS(decide)(top, 'like'));
+    else if (kind === 'pass') tx.value = withTiming(-SCREEN_W * 1.5, { duration: 240 }, () => runOnJS(decide)(top, 'pass'));
+    else ty.value = withTiming(-SCREEN_H, { duration: 260 }, () => runOnJS(decide)(top, 'superlike'));
+  }, [top, tx, ty, decide]);
+
+  const pan = Gesture.Pan()
+    .enabled(!!top)
+    .onUpdate((e) => {
+      tx.value = e.translationX;
+      ty.value = e.translationY;
+    })
+    .onEnd((e) => {
+      if (e.translationX > SWIPE_THRESHOLD) {
+        tx.value = withTiming(SCREEN_W * 1.5, { duration: 240 }, () => top && runOnJS(decide)(top, 'like'));
+      } else if (e.translationX < -SWIPE_THRESHOLD) {
+        tx.value = withTiming(-SCREEN_W * 1.5, { duration: 240 }, () => top && runOnJS(decide)(top, 'pass'));
+      } else if (e.translationY < -SWIPE_THRESHOLD) {
+        ty.value = withTiming(-SCREEN_H, { duration: 260 }, () => top && runOnJS(decide)(top, 'superlike'));
+      } else {
+        tx.value = withSpring(0);
+        ty.value = withSpring(0);
+      }
+    });
+
+  const topStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: tx.value },
+      { translateY: ty.value },
+      { rotate: `${interpolate(tx.value, [-SCREEN_W, SCREEN_W], [-12, 12], Extrapolation.CLAMP)}deg` },
+    ],
+  }));
+  const nextStyle = useAnimatedStyle(() => {
+    const p = Math.min(Math.abs(tx.value) / SCREEN_W, 1);
+    return { transform: [{ scale: interpolate(p, [0, 1], [0.94, 1]) }] };
+  });
+  const badgeOpacity = {
+    like: useAnimatedStyle(() => ({ opacity: interpolate(tx.value, [10, SWIPE_THRESHOLD], [0, 1], Extrapolation.CLAMP) })),
+    nope: useAnimatedStyle(() => ({ opacity: interpolate(tx.value, [-SWIPE_THRESHOLD, -10], [1, 0], Extrapolation.CLAMP) })),
+    superlike: useAnimatedStyle(() => ({ opacity: interpolate(ty.value, [-SWIPE_THRESHOLD, -10], [1, 0], Extrapolation.CLAMP) })),
+  };
 
   return (
-    <>
-      <StatusBar barStyle="dark-content" backgroundColor={white} />
-      <ScrollView
-        style={styles.root}
-        contentContainerStyle={{ paddingBottom: 100 + insets.bottom }}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <Animated.View
-          entering={FadeInDown.delay(0).duration(350)}
-          style={[styles.header, { paddingTop: insets.top + 12 }]}
-        >
-          <TouchableOpacity
-            style={styles.headerAvatar}
-            onPress={() => router.push('/(tabs)/profile' as any)}
-            activeOpacity={0.85}
-          >
-            {user?.photos?.[0] ? (
-              <Image source={{ uri: user.photos[0] }} style={styles.headerAvatarImg} contentFit="cover" />
-            ) : (
-              <Ionicons name="person" size={18} color={brand} />
-            )}
+    <GestureHandlerRootView style={styles.root}>
+      <ScreenGradient />
+      <StatusBar barStyle="dark-content" backgroundColor="#F3ECFF" />
+
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+        <TouchableOpacity style={styles.headerAvatar} onPress={() => router.push('/(tabs)/profile' as any)} activeOpacity={0.85}>
+          {user?.photos?.[0]
+            ? <Image source={{ uri: photoUri(user.photos[0], { size: 40 }) }} style={styles.headerAvatarImg} contentFit="cover" />
+            : <Ionicons name="person" size={18} color={brand} />}
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.greeting}>Discover</Text>
+          <Text style={styles.greetingName}>Hi {firstName} 👋</Text>
+        </View>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/(app)/connections' as any)} activeOpacity={0.75}>
+          <Ionicons name="people" size={22} color={ink} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Deck */}
+      <View style={styles.deck}>
+        {loading ? (
+          <ActivityIndicator color={brand} size="large" />
+        ) : !top ? (
+          <View style={styles.empty}>
+            <Ionicons name="sparkles-outline" size={56} color={brand} />
+            <Text style={styles.emptyTitle}>You're all caught up</Text>
+            <Text style={styles.emptySub}>No more people nearby right now. Check back soon or widen your radius.</Text>
+            <TouchableOpacity style={styles.reloadBtn} onPress={loadFeed} activeOpacity={0.85}>
+              <Text style={styles.reloadText}>Refresh</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {next && <Card user={next} style={[styles.stacked, nextStyle]} />}
+            <GestureDetector gesture={pan}>
+              <Card user={top} style={topStyle} badgeOpacity={badgeOpacity} />
+            </GestureDetector>
+          </>
+        )}
+      </View>
+
+      {/* Action buttons */}
+      {!loading && top && (
+        <View style={[styles.actions, { paddingBottom: insets.bottom + 90 }]}>
+          <TouchableOpacity style={[styles.actionBtn, styles.passBtn]} onPress={() => triggerSwipe('pass')} activeOpacity={0.8}>
+            <Ionicons name="close" size={30} color={nope} />
           </TouchableOpacity>
-          <View style={styles.headerCenter}>
-            <Text style={styles.greeting}>{greeting},</Text>
-            <Text style={styles.greetingName}>{firstName}</Text>
-            {city ? (
-              <View style={styles.locationRow}>
-                <Ionicons name="location" size={11} color={brand} />
-                <Text style={styles.locationText}>{city}</Text>
-              </View>
-            ) : null}
-          </View>
-          <View style={styles.headerIcons}>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/(app)/nearby' as any)} activeOpacity={0.75}>
-              <Ionicons name="search-outline" size={21} color={ink} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/(app)/notifications' as any)} activeOpacity={0.75}>
-              <Ionicons name="notifications-outline" size={21} color={ink} />
-              <View style={styles.notifBadge} />
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
+          <TouchableOpacity style={[styles.actionBtn, styles.superBtn]} onPress={() => triggerSwipe('superlike')} activeOpacity={0.8}>
+            <Ionicons name="star" size={24} color={superBlue} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actionBtn, styles.likeBtn]} onPress={() => triggerSwipe('like')} activeOpacity={0.8}>
+            <Ionicons name="heart" size={28} color={like} />
+          </TouchableOpacity>
+        </View>
+      )}
 
-        {/* ── Connections ─────────────────────────────────────────────────── */}
-        <Animated.View entering={FadeInDown.delay(50).duration(350)} style={styles.section}>
-          <SectionHeader
-            title="Connections"
-            icon="people"
-            onSeeAll={() => router.push('/(app)/connections' as any)}
-          />
-          <FlatList
-            data={mockConnections}
-            horizontal
-            keyExtractor={(c) => c.id}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.connRow}
-            renderItem={({ item }) => (
-              <ConnectionBubble
-                name={item.name}
-                photo={item.photo}
-                isOnline={item.isOnline}
-                onPress={() => router.push(`/(app)/user/${item.id}` as any)}
-              />
-            )}
-            ListEmptyComponent={
-              <View style={styles.emptyInline}>
-                <Text style={styles.emptyInlineText}>Meet people to see them here</Text>
-              </View>
-            }
-          />
-        </Animated.View>
-
-        {/* ── Nearby People ────────────────────────────────────────────────── */}
-        <Animated.View entering={FadeInDown.delay(200).duration(350)} style={styles.section}>
-          <SectionHeader
-            title="Nearby People"
-            live
-            onSeeAll={() => router.push('/(app)/nearby' as any)}
-          />
-          <FlatList
-            data={nearbyUsers.slice(0, 8)}
-            horizontal
-            keyExtractor={(u) => u.id}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.rowPadded}
-            renderItem={({ item }) => (
-              <PersonCard
-                person={item}
-                onPress={() => router.push(`/(app)/user/${item.id}` as any)}
-              />
-            )}
-            ListEmptyComponent={
-              <View style={styles.emptyInline}>
-                <Text style={styles.emptyInlineText}>Enable location to see nearby people</Text>
-              </View>
-            }
-          />
-        </Animated.View>
-      </ScrollView>
-    </>
+      {/* It's a Match overlay */}
+      <Modal visible={!!match} transparent animationType="fade" onRequestClose={() => setMatch(null)}>
+        <View style={styles.matchOverlay}>
+          <Text style={styles.matchTitle}>It's a Match! 🎉</Text>
+          <Text style={styles.matchSub}>You and {match?.name} liked each other</Text>
+          {match?.photo && <Image source={{ uri: photoUri(match.photo, { size: 150 }) }} style={styles.matchPhoto} contentFit="cover" />}
+          <TouchableOpacity
+            style={styles.matchBtnPrimary}
+            onPress={() => { setMatch(null); router.push('/(app)/connections' as any); }}
+            activeOpacity={0.88}
+          >
+            <Text style={styles.matchBtnPrimaryText}>See Connections</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setMatch(null)} activeOpacity={0.7}>
+            <Text style={styles.matchBtnGhost}>Keep swiping</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    </GestureHandlerRootView>
   );
 }
 
-// ─── Styles ────────────────────────────────────────────────────────────────────
-const VENUE_W  = 170;
-const VENUE_H  = 240;
-const PARTY_W  = 250;
-const PARTY_H  = 320;
-const PERSON_W = 128;
-const PERSON_H = 170;
-const CONN_AVT = 52;
+// ─── Styles ──────────────────────────────────────────────────────────────────
+const CARD_H = SCREEN_H * 0.62;
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: white },
+  root: { flex: 1, backgroundColor: '#F7F2FF' },
 
-  // ── Header
   header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 20, paddingBottom: 10,
-    backgroundColor: white, gap: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 20, paddingBottom: 10, backgroundColor: 'transparent',
   },
   headerAvatar: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: '#F3F4F6',
+    width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.6)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
   headerAvatarImg: { width: 38, height: 38 },
-  headerCenter: { flex: 1 },
-  greeting: { fontSize: 12, fontWeight: '400', color: inkSec },
-  greetingName: { fontSize: 18, fontWeight: '700', color: ink, marginTop: 0 },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 1 },
-  locationText: { fontSize: 11, color: brand, fontWeight: '500' },
-  headerIcons: { flexDirection: 'row', gap: 4 },
-  iconBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  notifBadge: {
-    position: 'absolute', top: 8, right: 8,
-    width: 7, height: 7, borderRadius: 4,
-    backgroundColor: '#EF4444', borderWidth: 1.5, borderColor: white,
+  greeting: { fontSize: 12, color: inkSec },
+  greetingName: { fontSize: 18, fontWeight: '700', color: ink },
+  iconBtn: {
+    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
   },
 
-  // ── Section
-  section: { marginTop: 4 },
-  sectionHeader: {
-    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 10,
+  deck: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 8 },
+  card: {
+    position: 'absolute',
+    width: CARD_W, height: CARD_H,
+    borderRadius: 24, overflow: 'hidden', backgroundColor: '#EDE9FE',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15, shadowRadius: 16, elevation: 6,
   },
-  sectionTitle: { fontSize: 17, fontWeight: '700', color: ink },
-  sectionSub: { fontSize: 11, color: inkSec, marginTop: 2 },
-  seeAll: { fontSize: 13, fontWeight: '500', color: inkSec, paddingTop: 2 },
-  pulseDot: { width: 8, height: 8, borderRadius: 4 },
-  rowPadded: { paddingHorizontal: 20, paddingBottom: 4, gap: 12 },
+  stacked: {},
+  cardFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#EDE9FE' },
 
-  // ── Connections
-  connRow: { paddingHorizontal: 20, paddingBottom: 4, gap: 14 },
-  connItem: { width: CONN_AVT + 4, alignItems: 'center', gap: 5 },
-  connAvatarWrap: { position: 'relative' },
-  connAvatar: { width: CONN_AVT, height: CONN_AVT, borderRadius: CONN_AVT / 2 },
-  connAvatarFallback: { backgroundColor: '#EDE9FE', alignItems: 'center', justifyContent: 'center' },
-  connOnlineDot: {
-    position: 'absolute', bottom: 1, right: 1,
-    width: 12, height: 12, borderRadius: 6,
-    backgroundColor: success, borderWidth: 2, borderColor: white,
+  onlinePill: {
+    position: 'absolute', top: 14, left: 14,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
   },
-  connName: { fontSize: 10, color: inkSec, textAlign: 'center' },
+  onlineDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: like },
+  onlineText: { color: white, fontSize: 11, fontWeight: '600' },
 
-  // ── Venue card
-  venueCard: {
-    width: VENUE_W, height: VENUE_H,
-    borderRadius: 18, overflow: 'hidden', backgroundColor: '#1A1A2E',
+  cardInfo: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 20 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cardName: { fontSize: 26, fontWeight: '800', color: white },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  cardMeta: { color: 'rgba(255,255,255,0.9)', fontSize: 13 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
+  chip: {
+    backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 5,
   },
-  openBadge: {
-    position: 'absolute', top: 10, left: 10,
-    backgroundColor: 'rgba(16,185,129,0.9)',
-    paddingHorizontal: 8, paddingVertical: 3,
-    borderRadius: 20,
-  },
-  closedBadge: { backgroundColor: 'rgba(107,114,128,0.85)' },
-  openBadgeText: { fontSize: 10, fontWeight: '700', color: white },
-  venueInfo: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 12 },
-  vibeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
-  vibeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: success },
-  vibeText: { fontSize: 10, color: 'rgba(255,255,255,0.9)', fontWeight: '600' },
-  musicType: { fontSize: 10, color: 'rgba(255,255,255,0.65)' },
-  venueName: { fontSize: 15, fontWeight: '700', color: white, marginBottom: 4 },
-  venueStats: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  venueStatItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  venueStatText: { fontSize: 10, color: 'rgba(255,255,255,0.7)' },
-  venueStatDiv: { fontSize: 10, color: 'rgba(255,255,255,0.4)' },
-  joinCrowdBtn: {
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 10, paddingVertical: 7,
-    alignItems: 'center',
-  },
-  joinCrowdText: { fontSize: 12, fontWeight: '600', color: white },
+  chipText: { color: white, fontSize: 12, fontWeight: '600' },
 
-  // ── House Party card
-  partyCard: {
-    width: PARTY_W, backgroundColor: white,
-    borderRadius: 18, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08, shadowRadius: 8, elevation: 3,
+  badge: {
+    position: 'absolute', top: 40, borderWidth: 4, borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 6,
   },
-  partyCoverWrap: {
-    width: PARTY_W, height: 140, backgroundColor: '#1A1A2E',
-  },
-  partyVibeTag: {
-    position: 'absolute', bottom: 10, left: 10,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20,
-  },
-  partyVibeText: { fontSize: 10, fontWeight: '600', color: white },
-  hostAvatarWrap: {
-    position: 'absolute', top: 10, right: 10,
-    width: 32, height: 32, borderRadius: 16,
-    borderWidth: 2, borderColor: white, overflow: 'hidden',
-  },
-  hostAvatar: { width: 32, height: 32 },
-  hostVerifiedDot: {
-    position: 'absolute', bottom: -1, right: -1,
-    width: 12, height: 12, borderRadius: 6,
-    backgroundColor: brand, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: white,
-  },
-  partyInfoWrap: { padding: 12 },
-  partyTitle: { fontSize: 14, fontWeight: '700', color: ink },
-  partyHost: { fontSize: 11, color: inkSec, marginTop: 2, marginBottom: 8 },
-  partyMeta: { gap: 4, marginBottom: 8 },
-  partyMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  partyMetaText: { fontSize: 11, color: inkSec },
-  genderRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  genderChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
-  genderText: { fontSize: 10, fontWeight: '600' },
+  badgeText: { fontSize: 28, fontWeight: '900', letterSpacing: 2 },
+  badgeLike: { left: 24, borderColor: like, transform: [{ rotate: '-18deg' }] },
+  badgeNope: { right: 24, borderColor: nope, transform: [{ rotate: '18deg' }] },
+  badgeSuper: { alignSelf: 'center', left: 0, right: 0, marginHorizontal: 'auto', borderColor: superBlue, top: 60 },
 
-  // ── Host Party CTA
-  hostPartyCta: {
-    marginHorizontal: 20, marginBottom: 12,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 14, paddingVertical: 12,
-    borderRadius: 14,
-    backgroundColor: '#FAFAFA',
-    borderWidth: 1, borderColor: '#EFEFF2',
+  actions: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 22,
+    paddingTop: 8,
   },
-  hostPartyLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  hostPartyIcon: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: '#F3EEFE',
+  actionBtn: {
     alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.7)', borderRadius: 999,
+    shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18, shadowRadius: 12, elevation: 5,
   },
-  hostPartyTitle: { fontSize: 15, fontWeight: '700', color: ink },
-  hostPartySub: { fontSize: 11, color: inkSec, marginTop: 1 },
+  passBtn: { width: 60, height: 60, borderWidth: 1, borderColor: '#FEE2E2' },
+  superBtn: { width: 50, height: 50, borderWidth: 1, borderColor: '#DBEAFE' },
+  likeBtn: { width: 60, height: 60, borderWidth: 1, borderColor: '#DCFCE7' },
 
-  // ── Nearby person
-  personCard: {
-    width: PERSON_W, height: PERSON_H,
-    borderRadius: 16, overflow: 'hidden', backgroundColor: '#EDE9FE',
+  empty: { alignItems: 'center', paddingHorizontal: 40, gap: 10 },
+  emptyTitle: { fontSize: 20, fontWeight: '800', color: ink, marginTop: 8 },
+  emptySub: { fontSize: 14, color: inkSec, textAlign: 'center', lineHeight: 21 },
+  reloadBtn: {
+    marginTop: 12, backgroundColor: brand, borderRadius: 999,
+    paddingHorizontal: 28, paddingVertical: 12,
   },
-  personOnlineDot: {
-    position: 'absolute', top: 10, left: 10,
-    width: 9, height: 9, borderRadius: 5,
-    backgroundColor: success, borderWidth: 1.5, borderColor: white,
-  },
-  personInfo: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 10 },
-  personName: { fontSize: 13, fontWeight: '600', color: white },
-  personDist: { fontSize: 10, color: 'rgba(255,255,255,0.7)', marginTop: 1 },
+  reloadText: { color: white, fontWeight: '700', fontSize: 15 },
 
-  // ── Empty states
-  emptyInline: { justifyContent: 'center', height: 56, paddingLeft: 4 },
-  emptyInlineText: { color: muted, fontSize: 12 },
-  emptyCard: {
-    width: 200, height: 160, backgroundColor: '#F9FAFB',
-    borderRadius: 16, alignItems: 'center', justifyContent: 'center',
-    gap: 8, padding: 16,
+  matchOverlay: {
+    flex: 1, backgroundColor: 'rgba(124,58,237,0.96)',
+    alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16,
   },
-  emptyCardText: { fontSize: 13, fontWeight: '600', color: ink, textAlign: 'center' },
-  emptyCardSub: { fontSize: 11, color: muted, textAlign: 'center' },
+  matchTitle: { fontSize: 34, fontWeight: '900', color: white, textAlign: 'center' },
+  matchSub: { fontSize: 16, color: 'rgba(255,255,255,0.9)', textAlign: 'center' },
+  matchPhoto: { width: 140, height: 140, borderRadius: 70, borderWidth: 4, borderColor: white, marginVertical: 12 },
+  matchBtnPrimary: { backgroundColor: white, borderRadius: 999, paddingHorizontal: 40, paddingVertical: 15 },
+  matchBtnPrimaryText: { color: brand, fontWeight: '800', fontSize: 16 },
+  matchBtnGhost: { color: 'rgba(255,255,255,0.9)', fontWeight: '600', fontSize: 15, marginTop: 6 },
 });

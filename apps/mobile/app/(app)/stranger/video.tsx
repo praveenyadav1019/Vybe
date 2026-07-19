@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   StatusBar, Alert,
@@ -9,6 +9,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useStrangerStore } from '../../../src/stores/strangerStore';
+import { socketClient } from '../../../src/lib/socket';
+import { useWebRTCCall } from '../../../src/lib/rtc/useWebRTCCall';
+import { RTCVideoView } from '../../../src/lib/rtc/RTCVideoView';
+import { strangerSignaling } from '../../../src/lib/rtc/signaling';
 
 // ─── Color tokens ─────────────────────────────────────────────────────────────
 const white  = '#FFFFFF';
@@ -54,6 +58,27 @@ export default function StrangerVideoScreen() {
   const [camOff, setCamOff] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [showChat, setShowChat] = useState(false);
+
+  // Request the WebRTC upgrade once (server replies with ICE servers + role).
+  useEffect(() => {
+    if (session && !session.iceServers) {
+      socketClient.emit('stranger:upgrade-video');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.sessionId]);
+
+  // WebRTC peer connection (native only; no-op on web/Expo Go).
+  const signaling = useMemo(() => strangerSignaling(), []);
+  const rtc = useWebRTCCall({
+    active: !!session?.iceServers,
+    video: true,
+    isOfferer: session?.isOfferer ?? false,
+    iceServers: session?.iceServers ?? [],
+    signaling,
+  });
+
+  const toggleMic = () => setMicMuted((v) => { rtc.setMuted(!v); return !v; });
+  const toggleCam = () => setCamOff((v) => { rtc.setCameraOff(!v); return !v; });
 
   // Session timer
   useEffect(() => {
@@ -102,13 +127,18 @@ export default function StrangerVideoScreen() {
           colors={['#1A1A2E', '#312E81']}
           style={StyleSheet.absoluteFillObject}
         />
-        {/* In production: replace with Agora RtcRemoteView or WebRTC RTCView */}
-        <View style={styles.remoteCenter}>
-          <LinearGradient colors={['#9333EA', accent]} style={styles.remoteAvatar}>
-            <Ionicons name="person" size={36} color={white} />
-          </LinearGradient>
-          {camOff && <Text style={styles.remoteOffText}>Stranger's camera is off</Text>}
-        </View>
+        {rtc.remoteStream ? (
+          <RTCVideoView stream={rtc.remoteStream} style={StyleSheet.absoluteFillObject} />
+        ) : (
+          <View style={styles.remoteCenter}>
+            <LinearGradient colors={['#9333EA', accent]} style={styles.remoteAvatar}>
+              <Ionicons name="person" size={36} color={white} />
+            </LinearGradient>
+            <Text style={styles.remoteOffText}>
+              {rtc.connected ? "Stranger's camera is off" : 'Connecting…'}
+            </Text>
+          </View>
+        )}
 
         {/* Timer overlay */}
         <Animated.View entering={FadeIn.duration(500)} style={[styles.timerBadge, { top: insets.top + 16 }]}>
@@ -141,15 +171,12 @@ export default function StrangerVideoScreen() {
         style={[styles.localVideo, { top: insets.top + 70 }]}
       >
         <LinearGradient colors={['#374151', '#1F2937']} style={StyleSheet.absoluteFillObject} />
-        {camOff ? (
+        {camOff || !rtc.localStream ? (
           <View style={styles.localOff}>
-            <Ionicons name="videocam-off-outline" size={20} color={white} />
+            <Ionicons name={camOff ? 'videocam-off-outline' : 'person-outline'} size={20} color={white} />
           </View>
         ) : (
-          /* In production: replace with Agora RtcLocalView or WebRTC RTCView */
-          <View style={styles.localOff}>
-            <Ionicons name="person-outline" size={20} color={white} />
-          </View>
+          <RTCVideoView stream={rtc.localStream} mirror style={StyleSheet.absoluteFillObject} />
         )}
       </Animated.View>
 
@@ -179,13 +206,13 @@ export default function StrangerVideoScreen() {
             icon={micMuted ? 'mic-off' : 'mic-outline'}
             label={micMuted ? 'Unmute' : 'Mute'}
             active={!micMuted}
-            onPress={() => setMicMuted((v) => !v)}
+            onPress={toggleMic}
           />
           <ControlBtn
             icon={camOff ? 'videocam-off' : 'videocam-outline'}
             label={camOff ? 'Camera On' : 'Camera Off'}
             active={!camOff}
-            onPress={() => setCamOff((v) => !v)}
+            onPress={toggleCam}
           />
           <ControlBtn
             icon="person-add-outline"

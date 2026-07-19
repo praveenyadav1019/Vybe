@@ -14,6 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useStrangerStore, type StrangerMode, type GenderPref } from '../../src/stores/strangerStore';
+import { ScreenGradient } from '../../src/components/ui/ScreenGradient';
 
 // ─── Color tokens ─────────────────────────────────────────────────────────────
 const bg     = '#F8F8FC';
@@ -155,7 +156,10 @@ export default function MeetScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={bg} />
+      <StatusBar barStyle="dark-content" backgroundColor="#F3ECFF" />
+
+      {/* Ambient glass gradient canvas */}
+      <ScreenGradient />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -357,14 +361,17 @@ const card = StyleSheet.create({
   wrap: {
     flex: 1, alignItems: 'center', gap: 6,
     paddingVertical: 14, paddingHorizontal: 8,
-    backgroundColor: white,
+    backgroundColor: 'rgba(255,255,255,0.55)',
     borderRadius: 16,
-    borderWidth: 1.5, borderColor: border,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
     position: 'relative',
+    shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08, shadowRadius: 10, elevation: 2,
   },
   wrapActive: {
     borderColor: brand,
-    backgroundColor: '#FAFAFF',
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    shadowOpacity: 0.2, shadowRadius: 14, elevation: 4,
   },
   iconBox: {
     width: 40, height: 40, borderRadius: 12,
@@ -389,12 +396,12 @@ const chip = StyleSheet.create({
     flex: 1, paddingVertical: 10,
     alignItems: 'center', justifyContent: 'center',
     borderRadius: 12,
-    borderWidth: 1.5, borderColor: border,
-    backgroundColor: white,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
+    backgroundColor: 'rgba(255,255,255,0.55)',
   },
   active: {
     borderColor: brand,
-    backgroundColor: '#F5F3FF',
+    backgroundColor: 'rgba(245,243,255,0.9)',
   },
   label: { fontSize: 13, fontWeight: '600', color: muted },
   labelActive: { color: brand },
@@ -403,6 +410,7 @@ const chip = StyleSheet.create({
 // ─── Main styles ──────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: bg },
+  heroBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, height: 480 },
 
   // Header
   header: {
@@ -442,9 +450,9 @@ const styles = StyleSheet.create({
   toggleRow: {
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: white,
+    backgroundColor: 'rgba(255,255,255,0.55)',
     borderRadius: 16,
-    borderWidth: 1.5, borderColor: border,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
     padding: 16,
   },
   toggleLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
@@ -478,9 +486,9 @@ const styles = StyleSheet.create({
   // How it works
   howCard: {
     marginHorizontal: 20, marginTop: 12,
-    backgroundColor: white,
+    backgroundColor: 'rgba(255,255,255,0.55)',
     borderRadius: 16,
-    borderWidth: 1.5, borderColor: border,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
     padding: 18, gap: 14,
   },
   howTitle: { fontSize: 15, fontWeight: '700', color: ink, marginBottom: 2 },

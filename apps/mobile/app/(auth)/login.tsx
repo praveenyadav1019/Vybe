@@ -19,7 +19,7 @@
  * "Create Account" → /(auth)/onboarding
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -45,13 +45,23 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
+import {
+  GoogleSignin,
+  statusCodes,
+  isSuccessResponse,
+  isErrorWithCode,
+} from '@react-native-google-signin/google-signin';
 import { apiFetch } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { C, T, S, R, SH, ANIM, DIM } from '@/design/tokens';
 
-WebBrowser.maybeCompleteAuthSession();
+// Configure the native Google Sign-In SDK once. `webClientId` is what scopes
+// the returned idToken's audience (the backend accepts web/android/ios).
+GoogleSignin.configure({
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB,
+  iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS,
+  offlineAccess: false,
+});
 
 const { width, height } = Dimensions.get('window');
 
@@ -158,11 +168,6 @@ export default function AuthWelcomeScreen() {
 
   // ── Google Sign-In ──────────────────────────────────────────────────────────
   const login = useAuthStore((s) => s.login);
-  const [, googleResponse, googlePrompt] = Google.useIdTokenAuthRequest({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_ANDROID,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS,
-  });
 
   async function finishGoogle(idToken: string) {
     setLoading(true);
@@ -181,21 +186,45 @@ export default function AuthWelcomeScreen() {
       );
       await login(res.accessToken, res.refreshToken, res.user);
       router.replace(res.isNewUser ? '/(auth)/profile-setup' : '/(tabs)/home');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Google sign-in failed');
+    } catch (e: any) {
+      const detail =
+        e?.status != null
+          ? `API ${e.status}: ${
+              e?.body && typeof e.body === 'object'
+                ? e.body.message ?? e.body.error ?? JSON.stringify(e.body)
+                : e?.body ?? ''
+            }`
+          : e instanceof Error
+            ? e.message
+            : 'Google sign-in failed';
+      setError(detail);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    if (googleResponse?.type === 'success' && googleResponse.params?.id_token) {
-      void finishGoogle(googleResponse.params.id_token);
+  async function handleGoogle() {
+    setError(null);
+    try {
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      const response = await GoogleSignin.signIn();
+      if (!isSuccessResponse(response)) return; // user dismissed the picker
+      const idToken = response.data.idToken;
+      if (!idToken) {
+        setError('Could not get Google ID token');
+        return;
+      }
+      await finishGoogle(idToken);
+    } catch (e) {
+      if (isErrorWithCode(e)) {
+        if (e.code === statusCodes.SIGN_IN_CANCELLED) return; // user cancelled
+        if (e.code === statusCodes.IN_PROGRESS) return;
+        setError(`Google sign-in failed (code ${e.code})`);
+        return;
+      }
+      setError('Google sign-in failed');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [googleResponse]);
-
-  const handleGoogle = () => { void googlePrompt(); };
+  }
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -340,6 +369,11 @@ export default function AuthWelcomeScreen() {
             <Text style={ss.googleG}>G</Text>
           </SocialBtn>
         </View>
+
+        {/* Always-visible auth error (social sign-in failures) */}
+        {error && !showPhone ? (
+          <Text style={[s.errorText, { textAlign: 'center', marginBottom: S[3] }]}>{error}</Text>
+        ) : null}
 
         {/* ── Footer ─────────────────────────────────────────────────────── */}
         <Text style={s.footer}>

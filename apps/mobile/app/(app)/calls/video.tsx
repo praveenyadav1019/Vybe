@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -28,11 +28,14 @@ import { BlurView } from 'expo-blur';
 import { colors } from '@/theme/colors';
 import { socketClient } from '@/lib/socket';
 import { api } from '@/lib/api';
-import { useAgoraCall } from '@/lib/agora/useAgoraCall';
-import { AgoraVideoView } from '@/lib/agora/AgoraVideoView';
+import { useWebRTCCall } from '@/lib/rtc/useWebRTCCall';
+import { RTCVideoView } from '@/lib/rtc/RTCVideoView';
+import { callSignaling } from '@/lib/rtc/signaling';
+import type { RTCIceServerConfig } from '@/lib/rtc/useWebRTCCall';
 
-// Agora RTC is wired via `@/lib/agora/useAgoraCall` (native engine) +
-// `@/lib/agora/AgoraVideoView` (RtcSurfaceView). Both are no-ops on web/Expo Go.
+// WebRTC is wired via `@/lib/rtc/useWebRTCCall` (native RTCPeerConnection) +
+// `@/lib/rtc/RTCVideoView` (RTCView). Both are no-ops on web/Expo Go. Signaling
+// rides the existing socket `webrtc:*` relays; ICE servers come from /calls/:id/ice.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type CallState = 'ringing' | 'connecting' | 'active' | 'ended';
@@ -93,7 +96,7 @@ function RemoteVideoPlaceholder({ name, callState }: { name: string; callState: 
 function LocalVideoPlaceholder() {
   return (
     <View style={styles.localVideoPlaceholder}>
-      {/* TODO: Replace with Agora RtcSurfaceView for local uid (0) */}
+      {/* Shown as the RTCVideoView fallback until the local stream is ready. */}
       <LinearGradient
         colors={['#2A1050', '#1A0533']}
         style={styles.localVideoGradient}
@@ -303,19 +306,35 @@ export default function VideoCallScreen() {
   const timer = useCallTimer(callState === 'active');
   const durationSecRef = useRef(0);
 
-  // ── Agora RTC engine (native only; no-op on web/Expo Go) ──────────────────
-  const agora = useAgoraCall({
-    callId,
-    active: callState === 'connecting' || callState === 'active',
+  // ── WebRTC engine (native only; no-op on web/Expo Go) ─────────────────────
+  const [iceServers, setIceServers] = useState<RTCIceServerConfig[]>([]);
+  useEffect(() => {
+    if (!callId) return;
+    let cancelled = false;
+    api
+      .get<{ iceServers: RTCIceServerConfig[] }>(`/calls/${callId}/ice`)
+      .then(({ data }) => { if (!cancelled) setIceServers(data.iceServers ?? []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [callId]);
+
+  // The caller (non-incoming) is the offerer. The callee accepts first, so its
+  // hook mounts (and subscribes) before the caller creates the offer.
+  const signaling = useMemo(() => callSignaling(userId ?? '', callId), [userId, callId]);
+  const rtc = useWebRTCCall({
+    active: callState === 'active' && iceServers.length > 0 && !!userId,
     video: true,
+    isOfferer: !incomingCall,
+    iceServers,
+    signaling,
   });
 
   const handleToggleMute = useCallback(() => {
-    setIsMuted((m) => { agora.setMuted(!m); return !m; });
-  }, [agora]);
+    setIsMuted((m) => { rtc.setMuted(!m); return !m; });
+  }, [rtc]);
   const handleToggleCamera = useCallback(() => {
-    setIsCameraOff((c) => { agora.setCameraOff(!c); return !c; });
-  }, [agora]);
+    setIsCameraOff((c) => { rtc.setCameraOff(!c); return !c; });
+  }, [rtc]);
 
   // Auto-hide controls after 4 seconds of inactivity
   const resetControlsTimer = useCallback(() => {
@@ -373,7 +392,7 @@ export default function VideoCallScreen() {
   const endCall = useCallback(
     async (emitEnd = true) => {
       setCallState('ended');
-      agora.leave();
+      rtc.leave();
       if (emitEnd) {
         socketClient.emit('call:end', { callId });
         if (callId) {
@@ -416,8 +435,8 @@ export default function VideoCallScreen() {
 
   const handleFlipCamera = useCallback(() => {
     setIsFrontCamera((prev) => !prev);
-    agora.switchCamera();
-  }, [agora]);
+    rtc.switchCamera();
+  }, [rtc]);
 
   // ── Not verified gate ────────────────────────────────────────────────────
   if (!bothVerified) {
@@ -439,8 +458,8 @@ export default function VideoCallScreen() {
         onPress={resetControlsTimer}
         style={StyleSheet.absoluteFill}
       >
-        {agora.remoteUid != null ? (
-          <AgoraVideoView uid={agora.remoteUid} style={StyleSheet.absoluteFillObject} />
+        {rtc.remoteStream != null ? (
+          <RTCVideoView stream={rtc.remoteStream} style={StyleSheet.absoluteFillObject} />
         ) : (
           <RemoteVideoPlaceholder name={name} callState={callState} />
         )}
@@ -454,8 +473,9 @@ export default function VideoCallScreen() {
             { top: insets.top + 80, right: 16 },
           ]}
         >
-          <AgoraVideoView
-            uid={0}
+          <RTCVideoView
+            stream={rtc.localStream}
+            mirror={isFrontCamera}
             style={StyleSheet.absoluteFillObject}
             fallback={<LocalVideoPlaceholder />}
           />

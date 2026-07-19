@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { socketClient } from '../lib/socket';
 import { api } from '../lib/api';
+import type { RTCIceServerConfig } from '../lib/rtc/useWebRTCCall';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,8 +28,10 @@ export interface ActiveSession {
   mode:      StrangerMode;
   partner:   StrangerPartner;
   startedAt: number;
-  agoraToken?:  string | null;
-  agoraAppId?:  string | null;
+  /** WebRTC ICE servers (STUN + TURN creds) delivered on video upgrade. */
+  iceServers?: RTCIceServerConfig[];
+  /** Whether this client should create the SDP offer for the video upgrade. */
+  isOfferer?: boolean;
 }
 
 export interface StrangerMessage {
@@ -89,7 +92,7 @@ interface StrangerState {
   _onQueueUpdate:    (position: number, searching: boolean) => void;
   _onFriendRequest:  (from: { fromName: string; fromPhoto: string | null }) => void;
   _onFriendRequestSent: () => void;
-  _onVideoReady:     (payload: { agoraToken: string | null; agoraAppId: string | null; roomId: string }) => void;
+  _onVideoReady:     (payload: { iceServers: RTCIceServerConfig[]; isOfferer: boolean; roomId: string }) => void;
   _onError:          (message: string) => void;
 }
 
@@ -244,8 +247,8 @@ export const useStrangerStore = create<StrangerState>((set, get) => ({
         ? {
             ...s.session,
             mode:       'video',
-            agoraToken: payload.agoraToken,
-            agoraAppId: payload.agoraAppId,
+            iceServers: payload.iceServers,
+            isOfferer:  payload.isOfferer,
             roomId:     payload.roomId,
           }
         : null,
@@ -284,7 +287,7 @@ export function attachStrangerSocketListeners() {
     store._onFriendRequestSent();
   });
   socketClient.on('stranger:video-ready', (raw) => {
-    store._onVideoReady(raw as { agoraToken: string | null; agoraAppId: string | null; roomId: string });
+    store._onVideoReady(raw as { iceServers: RTCIceServerConfig[]; isOfferer: boolean; roomId: string });
   });
   socketClient.on('stranger:error', (raw) => {
     const { message } = raw as { code: string; message: string };

@@ -115,32 +115,6 @@ export default function OtpScreen() {
     setError(null);
     setLoading(true);
 
-    if (finalCode === '123456') {
-      const mockUser = {
-        id: 'dev-user-1',
-        phone,
-        name: 'Praveen',
-        age: 26,
-        gender: 'male' as const,
-        photos: ['https://randomuser.me/api/portraits/men/10.jpg'],
-        interests: ['Music', 'Travel', 'Nightlife'],
-        isVerified: true,
-        isPremium: false,
-        activeMode: 'happening' as const,
-        isOnline: true,
-        lastSeen: new Date().toISOString(),
-        safetyMode: false,
-        privacyLevel: 'public' as const,
-        createdAt: new Date().toISOString(),
-      };
-      await login('dev-access-token', 'dev-refresh-token', mockUser);
-      successScale.value = withSpring(1, { damping: 12, stiffness: 200 });
-      setVerified(true);
-      setTimeout(() => router.replace('/(tabs)/home'), 600);
-      setLoading(false);
-      return;
-    }
-
     try {
       const res = await apiFetch<{ accessToken: string; refreshToken: string; user: any; isNewUser?: boolean }>(
         '/auth/verify-otp',

@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useChatStore } from '../../src/stores/chatStore';
+import { ScreenGradient } from '../../src/components/ui/ScreenGradient';
 
 // ─── Color tokens ─────────────────────────────────────────────────────────────
 const ink     = '#1A1A2E';
@@ -110,7 +111,8 @@ export default function ChatTabScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={white} />
+      <ScreenGradient />
+      <StatusBar barStyle="dark-content" backgroundColor="#ECE4FF" />
 
       {/* Header */}
       <Animated.View entering={FadeInDown.delay(0).duration(350)} style={styles.header}>
@@ -212,7 +214,7 @@ export default function ChatTabScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: white },
+  root: { flex: 1, backgroundColor: '#F7F2FF' },
 
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -226,7 +228,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', gap: 6,
     marginHorizontal: 20, marginBottom: 12,
     padding: 4, borderRadius: 14,
-    backgroundColor: bgSec, borderWidth: 1, borderColor: border,
+    backgroundColor: 'rgba(255,255,255,0.5)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
   },
   segmentBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -240,7 +242,7 @@ const styles = StyleSheet.create({
   chipRow: { paddingHorizontal: 20, gap: 8, paddingBottom: 12 },
   chip: {
     paddingHorizontal: 16, paddingVertical: 7, borderRadius: 999,
-    backgroundColor: white, borderWidth: 1, borderColor: '#E5E7EB',
+    backgroundColor: 'rgba(255,255,255,0.55)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.85)',
   },
   chipActive: { backgroundColor: brand, borderColor: brand },
   chipText: { fontSize: 13, fontWeight: '600', color: inkSec },
@@ -250,8 +252,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 8,
     marginHorizontal: 20, marginBottom: 8,
     paddingHorizontal: 14, paddingVertical: 10,
-    backgroundColor: bgSec, borderRadius: 14,
-    borderWidth: 1, borderColor: border,
+    backgroundColor: 'rgba(255,255,255,0.55)', borderRadius: 14,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
   },
   searchInput: { flex: 1, fontSize: 14, color: ink },
 

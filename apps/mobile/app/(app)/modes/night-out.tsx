@@ -147,38 +147,6 @@ export default function NightOutModeScreen() {
           </Animated.View>
         )}
 
-        {/* Happening Places */}
-        {isActive && happeningPlaces.length > 0 && (
-          <Animated.View entering={FadeInDown.delay(250)}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Happening Places 🔥</Text>
-              <TouchableOpacity onPress={() => router.push('/(app)/places/')}>
-                <Text style={styles.seeAll}>See All</Text>
-              </TouchableOpacity>
-            </View>
-            {happeningPlaces.map((place) => (
-              <TouchableOpacity
-                key={place.id}
-                onPress={() => router.push(`/(app)/places/${place.id}`)}
-              >
-                <GlassCard style={styles.placeCard}>
-                  <View style={styles.placeRow}>
-                    <View style={styles.placeIcon}>
-                      <Text style={{ fontSize: 24 }}>🎵</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.placeName}>{place.name}</Text>
-                      <Text style={styles.placeAddr}>{place.address}</Text>
-                    </View>
-                    <View style={styles.vibeScore}>
-                      <Text style={styles.vibeScoreText}>⚡ {place.vibeScore.toFixed(1)}</Text>
-                    </View>
-                  </View>
-                </GlassCard>
-              </TouchableOpacity>
-            ))}
-          </Animated.View>
-        )}
 
         {/* Solo Night Owls */}
         {isActive && nightOwlsList.length > 0 && (

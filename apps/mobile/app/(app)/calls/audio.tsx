@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,9 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors } from '@/theme/colors';
 import { socketClient } from '@/lib/socket';
 import { api } from '@/lib/api';
-import { useAgoraCall } from '@/lib/agora/useAgoraCall';
+import { useWebRTCCall } from '@/lib/rtc/useWebRTCCall';
+import { callSignaling } from '@/lib/rtc/signaling';
+import type { RTCIceServerConfig } from '@/lib/rtc/useWebRTCCall';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type CallState = 'ringing' | 'connecting' | 'active' | 'ended';
@@ -226,11 +228,25 @@ export default function AudioCallScreen() {
   const name = callerName ?? 'Unknown';
   const incomingCall = isIncoming === 'true';
 
-  // ── Agora RTC engine (native only; no-op on web/Expo Go) ──────────────────
-  const agora = useAgoraCall({
-    callId,
-    active: callState === 'connecting' || callState === 'active',
+  // ── WebRTC engine (audio-only; native only; no-op on web/Expo Go) ─────────
+  const [iceServers, setIceServers] = useState<RTCIceServerConfig[]>([]);
+  useEffect(() => {
+    if (!callId) return;
+    let cancelled = false;
+    api
+      .get<{ iceServers: RTCIceServerConfig[] }>(`/calls/${callId}/ice`)
+      .then(({ data }) => { if (!cancelled) setIceServers(data.iceServers ?? []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [callId]);
+
+  const signaling = useMemo(() => callSignaling(userId ?? '', callId), [userId, callId]);
+  const rtc = useWebRTCCall({
+    active: callState === 'active' && iceServers.length > 0 && !!userId,
     video: false,
+    isOfferer: !incomingCall,
+    iceServers,
+    signaling,
   });
 
   // Status text
@@ -299,7 +315,7 @@ export default function AudioCallScreen() {
   const endCall = useCallback(
     async (emitEnd = true) => {
       Vibration.cancel();
-      agora.leave();
+      rtc.leave();
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
       }
@@ -356,12 +372,12 @@ export default function AudioCallScreen() {
   }, [callId, router]);
 
   const handleToggleMute = useCallback(() => {
-    setIsMuted((m) => { agora.setMuted(!m); return !m; });
-  }, [agora]);
+    setIsMuted((m) => { rtc.setMuted(!m); return !m; });
+  }, [rtc]);
 
   const handleToggleSpeaker = useCallback(() => {
-    setIsSpeaker((s) => { agora.setSpeaker(!s); return !s; });
-  }, [agora]);
+    setIsSpeaker((s) => { rtc.setSpeaker(!s); return !s; });
+  }, [rtc]);
 
   const isRinging = callState === 'ringing' || callState === 'connecting';
 

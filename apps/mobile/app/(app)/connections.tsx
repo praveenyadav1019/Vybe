@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { api } from '../../src/lib/api';
+import { ScreenGradient } from '../../src/components/ui/ScreenGradient';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ConnectionUser {
@@ -52,8 +53,6 @@ const TYPE_LABELS: Record<string, { label: string; icon: string; color: string; 
 const TABS = [
   { key: 'all',           label: 'All' },
   { key: 'matched',       label: 'Matched' },
-  { key: 'met_at_party',  label: 'Party' },
-  { key: 'met_at_venue',  label: 'Venue' },
   { key: 'stranger_chat', label: 'Random' },
 ] as const;
 type TabKey = typeof TABS[number]['key'];
@@ -159,7 +158,8 @@ export default function ConnectionsScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={white} />
+      <ScreenGradient />
+      <StatusBar barStyle="dark-content" backgroundColor="#ECE4FF" />
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <Animated.View entering={FadeInDown.delay(0).duration(350)} style={styles.header}>
@@ -267,7 +267,7 @@ const row = StyleSheet.create({
   wrap: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 12, gap: 12,
-    backgroundColor: white,
+    backgroundColor: 'transparent',
   },
   avatarWrap: { position: 'relative' },
   avatar: { width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2 },
@@ -296,13 +296,12 @@ const row = StyleSheet.create({
 
 // ─── Screen styles ────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: bg },
+  root: { flex: 1, backgroundColor: '#F7F2FF' },
 
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10,
-    backgroundColor: white,
-    borderBottomWidth: 1, borderBottomColor: border,
+    backgroundColor: 'transparent',
   },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerCenter: { alignItems: 'center', gap: 4 },
@@ -314,7 +313,7 @@ const styles = StyleSheet.create({
   onlineBadgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: success },
   onlineBadgeText: { fontSize: 11, fontWeight: '600', color: '#166534' },
 
-  tabsWrap: { backgroundColor: white, borderBottomWidth: 1, borderBottomColor: border },
+  tabsWrap: { backgroundColor: 'transparent' },
   tabsRow: { paddingHorizontal: 12, paddingBottom: 4, gap: 6 },
   tab: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, marginTop: 6 },
   tabActive: { backgroundColor: '#EDE9FE' },
@@ -325,8 +324,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     marginHorizontal: 16, marginVertical: 10,
     paddingHorizontal: 14, paddingVertical: 10,
-    backgroundColor: white, borderRadius: 12,
-    borderWidth: 1, borderColor: border,
+    backgroundColor: 'rgba(255,255,255,0.55)', borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)',
   },
   searchInput: { flex: 1, fontSize: 14, color: ink },
 

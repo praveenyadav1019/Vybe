@@ -9,7 +9,13 @@ import {
   Platform,
   Image,
   Alert,
+  Modal,
+  Pressable,
+  Dimensions,
 } from 'react-native';
+
+const { width: SCREEN_W } = Dimensions.get('window');
+const AVATAR_SIZE = (SCREEN_W - 40 - 28) / 3;
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -21,6 +27,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
+import { AVATARS, isRemotePhoto } from '@/lib/avatars';
+import { uploadPhoto } from '@/lib/uploadPhoto';
 import { colors } from '@/theme/colors';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -78,6 +86,8 @@ export default function ProfileSetupScreen() {
   const [photos, setPhotos] = useState<(string | null)[]>(Array(PHOTO_SLOTS).fill(null));
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [targetIndex, setTargetIndex] = useState<number | null>(null);
+  const [sheet, setSheet] = useState<'menu' | 'avatars' | null>(null);
 
   // Progress bar animation
   const progressWidth = useSharedValue(0);
@@ -118,28 +128,38 @@ export default function ProfileSetupScreen() {
     // Final submit
     setLoading(true);
     try {
-      const formData = new FormData();
-      formData.append('name', name.trim());
-      formData.append('age', age);
-      formData.append('gender', gender!);
-      formData.append('bio', bio.trim());
-
-      // Upload valid photo uris
-      const validPhotos = photos.filter(Boolean) as string[];
-      validPhotos.forEach((uri, idx) => {
-        formData.append(`photos[${idx}]`, {
-          uri,
-          name: `photo_${idx}.jpg`,
-          type: 'image/jpeg',
-        } as unknown as Blob);
+      // 1. Save text fields (JSON — PATCH /me does not handle photos).
+      await api.patch('/me', {
+        name: name.trim(),
+        age: parseInt(age, 10),
+        gender: gender!,
+        bio: bio.trim(),
       });
 
-      await api.patch('/me', formData);
+      // 2. Persist photos: avatars are already hosted URLs; local files are
+      //    uploaded to storage. Both end up on the profile via POST /me/photos.
+      const urls: string[] = [];
+      for (const uri of photos.filter(Boolean) as string[]) {
+        if (isRemotePhoto(uri)) {
+          urls.push(uri);
+        } else {
+          try {
+            urls.push(await uploadPhoto(uri));
+          } catch {
+            /* skip a failed local upload — an avatar/other photo still counts */
+          }
+        }
+      }
+      if (urls.length) {
+        await api.post('/me/photos', { urls });
+      }
+
       updateUser({
         name: name.trim(),
         age: parseInt(age, 10),
         gender: gender!,
         bio: bio.trim(),
+        photos: urls,
       });
       router.replace('/(auth)/interests');
     } catch (e) {
@@ -149,16 +169,35 @@ export default function ProfileSetupScreen() {
     }
   }
 
-  async function handlePhotoSlot(index: number) {
+  function openChooser(index: number) {
+    setTargetIndex(index);
+    setSheet('menu');
+  }
+  function closeSheet() {
+    setSheet(null);
+    setTargetIndex(null);
+  }
+  function setPhotoAt(index: number, value: string) {
+    setPhotos((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+    if (errors.photos) setErrors((e) => ({ ...e, photos: '' }));
+  }
+
+  async function handleUploadPhoto() {
+    const idx = targetIndex;
+    setSheet(null);
+    if (idx == null) return;
     const uri = await pickImage();
-    if (uri) {
-      setPhotos((prev) => {
-        const next = [...prev];
-        next[index] = uri;
-        return next;
-      });
-      if (errors.photos) setErrors((e) => ({ ...e, photos: '' }));
-    }
+    if (uri) setPhotoAt(idx, uri);
+    setTargetIndex(null);
+  }
+
+  function handlePickAvatar(url: string) {
+    if (targetIndex != null) setPhotoAt(targetIndex, url);
+    closeSheet();
   }
 
   function removePhoto(index: number) {
@@ -322,7 +361,7 @@ export default function ProfileSetupScreen() {
                   <TouchableOpacity
                     key={i}
                     style={[styles.photoSlot, i === 0 && styles.photoSlotMain]}
-                    onPress={() => (uri ? undefined : handlePhotoSlot(i))}
+                    onPress={() => (uri ? undefined : openChooser(i))}
                     activeOpacity={0.8}
                   >
                     {uri ? (
@@ -374,6 +413,63 @@ export default function ProfileSetupScreen() {
           style={styles.nextBtn}
         />
       </View>
+
+      {/* Add-photo chooser: upload or pick a prebuilt avatar */}
+      <Modal visible={sheet !== null} transparent animationType="slide" onRequestClose={closeSheet}>
+        <Pressable style={styles.sheetBackdrop} onPress={closeSheet}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHandle} />
+
+            {sheet === 'menu' && (
+              <>
+                <Text style={styles.sheetTitle}>Add a photo</Text>
+                <Text style={styles.sheetSub}>Upload your own or pick a ready-made avatar</Text>
+
+                <TouchableOpacity style={styles.optionRow} activeOpacity={0.85} onPress={handleUploadPhoto}>
+                  <View style={[styles.optionIcon, { backgroundColor: '#EDE9FE' }]}>
+                    <Ionicons name="image-outline" size={22} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.optionTitle}>Upload Photo</Text>
+                    <Text style={styles.optionDesc}>Choose from your library</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.subtext} />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.optionRow} activeOpacity={0.85} onPress={() => setSheet('avatars')}>
+                  <View style={[styles.optionIcon, { backgroundColor: '#FDF6E3' }]}>
+                    <Ionicons name="happy-outline" size={22} color="#C9A84C" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.optionTitle}>Choose Avatar</Text>
+                    <Text style={styles.optionDesc}>Pick a prebuilt avatar</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.subtext} />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {sheet === 'avatars' && (
+              <>
+                <View style={styles.avatarHeader}>
+                  <TouchableOpacity onPress={() => setSheet('menu')} hitSlop={8}>
+                    <Ionicons name="chevron-back" size={22} color={colors.text} />
+                  </TouchableOpacity>
+                  <Text style={styles.sheetTitle}>Choose an avatar</Text>
+                  <View style={{ width: 22 }} />
+                </View>
+                <ScrollView contentContainerStyle={styles.avatarGrid} showsVerticalScrollIndicator={false}>
+                  {AVATARS.map((url) => (
+                    <TouchableOpacity key={url} activeOpacity={0.8} onPress={() => handlePickAvatar(url)}>
+                      <Image source={{ uri: url }} style={styles.avatarImg} />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -645,5 +741,46 @@ const styles = StyleSheet.create({
   },
   nextBtn: {
     borderRadius: 16,
+  },
+
+  // ── Add-photo chooser sheet ──────────────────────────────────────────────
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 28,
+    maxHeight: '80%',
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: colors.border,
+    marginBottom: 16,
+  },
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: colors.text, textAlign: 'center' },
+  sheetSub: { fontSize: 13, color: colors.subtext, textAlign: 'center', marginTop: 4, marginBottom: 16 },
+  optionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingVertical: 14, paddingHorizontal: 14,
+    borderRadius: 16, borderWidth: 1, borderColor: colors.border, marginBottom: 12,
+  },
+  optionIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  optionTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
+  optionDesc: { fontSize: 12, color: colors.subtext, marginTop: 2 },
+  avatarHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16,
+  },
+  avatarGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 14, justifyContent: 'center', paddingBottom: 8,
+  },
+  avatarImg: {
+    width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: 16, backgroundColor: '#F3F4F6',
   },
 });

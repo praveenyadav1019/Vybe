@@ -111,7 +111,6 @@ export interface CallSessionDTO {
   fromUserId: string;
   toUserId: string;
   channelName?: string;
-  agoraToken?: string;
   startedAt?: string;
   duration?: number;
 }
@@ -140,14 +139,6 @@ export interface PaginatedResponse<T> {
   page: number;
   limit: number;
   hasMore: boolean;
-}
-
-// ─── WebRTC / Agora ────────────────────────────────────────────────────────────
-
-export interface WebRTCProvider {
-  readonly name: string;
-  joinChannel(channelId: string, token: string): Promise<void>;
-  leaveChannel(): Promise<void>;
 }
 
 // ─── Socket Event Maps ────────────────────────────────────────────────────────────
