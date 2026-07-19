@@ -94,6 +94,11 @@ services:
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-}
       STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-}
       STORAGE_USE_INSTANCE_ROLE: ${STORAGE_USE_INSTANCE_ROLE:-false}
+      # Public base URL of this API. With a private bucket and no CDN, stored
+      # photo URLs point at ${PUBLIC_API_URL}/media/<key>, which redirects to a
+      # freshly signed S3 GET.
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-}
+      STORAGE_CDN_URL_CONFIGURED: ${STORAGE_CDN_URL_CONFIGURED:-false}
       STORAGE_CDN_URL: ${STORAGE_CDN_URL:-https://cdn.vybeon.com}
     # Loopback only — public traffic arrives via nginx (:80), which reaches the
     # API as api:4000 over the compose network, not through this host port.

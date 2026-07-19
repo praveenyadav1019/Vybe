@@ -41,6 +41,14 @@ const schema = z.object({
   // leave STORAGE_ACCESS_KEY/SECRET empty. The SDK then resolves credentials
   // from IMDS, so no storage secrets are stored on the box at all.
   STORAGE_USE_INSTANCE_ROLE: z.coerce.boolean().default(false),
+  // Publicly reachable base URL of THIS api (e.g. http://13.207.255.81 or
+  // https://api.yourdomain.com). When no CDN is configured, stored photo URLs
+  // point at `${PUBLIC_API_URL}/media/<key>`, which redirects to a freshly
+  // signed S3 GET — so the bucket can stay private.
+  PUBLIC_API_URL: z.string().optional(),
+  // Set true only when STORAGE_CDN_URL is a real CDN in front of the bucket
+  // (e.g. CloudFront). Otherwise the /media proxy is used.
+  STORAGE_CDN_URL_CONFIGURED: z.coerce.boolean().default(false),
 
   // Google OAuth (Sign-In) — verify ID tokens issued to these client IDs
   GOOGLE_CLIENT_ID_WEB: z.string().optional(),

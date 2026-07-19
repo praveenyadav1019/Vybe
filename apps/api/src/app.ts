@@ -15,6 +15,7 @@ import callsRoutes from "./routes/calls.js";
 import safetyRoutes from "./routes/safety.js";
 import clubmatesRoutes from "./routes/clubmates.js";
 import connectionsRoutes from "./routes/connections.js";
+import mediaRoutes from "./routes/media.js";
 import strangerRoutes from "./routes/stranger.js";
 import adminRoutes from "./routes/admin.js";
 
@@ -127,6 +128,7 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
   await app.register(safetyRoutes);
   await app.register(clubmatesRoutes);
   await app.register(connectionsRoutes);
+  await app.register(mediaRoutes);
   await app.register(strangerRoutes);
   await app.register(adminRoutes);
 

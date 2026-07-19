@@ -86,7 +86,61 @@ export async function createPresignedUpload(
   });
 
   const uploadUrl = await getSignedUrl(client, command, { expiresIn: 300 });
-  const publicUrl = `${env.STORAGE_CDN_URL.replace(/\/$/, "")}/${fileKey}`;
 
-  return { uploadUrl, fileKey, publicUrl };
+  return { uploadUrl, fileKey, publicUrl: publicUrlFor(env, fileKey) };
+}
+
+/**
+ * The durable URL we persist on the profile.
+ *
+ * Presigned GET URLs expire, so we must never store one. Instead:
+ *  - With a real CDN in front of the bucket (CloudFront), store the CDN URL.
+ *  - Otherwise store a stable URL on our own API (`/media/<key>`), which
+ *    302-redirects to a freshly signed GET each time. The bucket can stay
+ *    private ("Block all public access") and stored URLs never go stale.
+ */
+export function publicUrlFor(env: Env, fileKey: string): string {
+  const base = usesOwnMediaProxy(env)
+    ? `${(env.PUBLIC_API_URL || "").replace(/\/$/, "")}/media`
+    : env.STORAGE_CDN_URL.replace(/\/$/, "");
+  return `${base}/${fileKey}`;
+}
+
+/** True when no external CDN is configured and we serve media ourselves. */
+export function usesOwnMediaProxy(env: Env): boolean {
+  return Boolean(env.PUBLIC_API_URL) && !env.STORAGE_CDN_URL_CONFIGURED;
+}
+
+/**
+ * Short-lived presigned GET URL for an object. Used by the /media redirect so
+ * the bucket never needs public-read.
+ */
+export async function createPresignedDownload(
+  env: Env,
+  fileKey: string,
+  expiresIn = 900,
+): Promise<string> {
+  const { S3Client, GetObjectCommand } = await import("@aws-sdk/client-s3");
+  const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
+
+  const hasExplicitKeys = Boolean(env.STORAGE_ACCESS_KEY && env.STORAGE_SECRET_KEY);
+  const client = new S3Client({
+    region: env.STORAGE_REGION,
+    endpoint: env.STORAGE_ENDPOINT || undefined,
+    forcePathStyle: Boolean(env.STORAGE_ENDPOINT),
+    ...(hasExplicitKeys
+      ? {
+          credentials: {
+            accessKeyId: env.STORAGE_ACCESS_KEY!,
+            secretAccessKey: env.STORAGE_SECRET_KEY!,
+          },
+        }
+      : {}),
+  });
+
+  return getSignedUrl(
+    client,
+    new GetObjectCommand({ Bucket: env.STORAGE_BUCKET, Key: fileKey }),
+    { expiresIn },
+  );
 }
