@@ -139,10 +139,13 @@ export default function PhotoUploadScreen() {
       Alert.alert('Permission needed', 'Please allow access to your photo library.');
       return;
     }
+    // allowsEditing is deliberately OFF. On Android it launches the system crop
+    // activity, whose only confirm control is a small "CROP" label in the top-right
+    // — users read that screen as a dead end ("no way to proceed"). Cards already
+    // render with contentFit="cover", so we get the right framing without it.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [3, 4],
+      allowsEditing: false,
       quality: 0.85,
     });
     if (!result.canceled && result.assets[0]) {
@@ -152,9 +155,18 @@ export default function PhotoUploadScreen() {
       try {
         const cdnUrl = await uploadPhoto(asset.uri, asset.mimeType ?? 'image/jpeg');
         setPhotos((cur) => { const n = [...cur]; n[index] = cdnUrl; return n; });
-      } catch {
+      } catch (e: any) {
         setPhotos((cur) => { const n = [...cur]; n[index] = null; return n; });
-        Alert.alert('Upload failed', 'Could not upload that photo. Please try again.');
+        // 503 = the server has no object storage configured. Say so plainly and
+        // point at the path that does work, rather than "try again" (which never
+        // succeeds) leaving the user staring at a disabled Continue button.
+        const noStorage = e?.status === 503 || e?.response?.status === 503;
+        Alert.alert(
+          noStorage ? 'Photo uploads unavailable' : 'Upload failed',
+          noStorage
+            ? "Photo uploads aren't set up on the server yet. You can pick a ready-made avatar instead — tap a slot and choose \"Choose Avatar\"."
+            : 'Could not upload that photo. Please check your connection and try again.',
+        );
       }
     }
   }

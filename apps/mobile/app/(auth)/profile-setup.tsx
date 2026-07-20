@@ -57,10 +57,11 @@ async function pickImage(): Promise<string | null> {
       Alert.alert('Permission needed', 'Allow access to your photo library to upload photos.');
       return null;
     }
+    // allowsEditing OFF — see photo-upload.tsx: Android's system crop activity
+    // confirms via a small top-right "CROP" label and reads as a dead end.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [3, 4],
+      allowsEditing: false,
       quality: 0.85,
     });
     if (!result.canceled && result.assets?.[0]) {
